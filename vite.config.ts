@@ -14,5 +14,14 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.spec.ts'],
+    /**
+     * El limite por defecto de vitest son 5 s. Varios tests resuelven el
+     * problema inverso, que encadena decenas de simulaciones, y en una
+     * maquina cargada eso se pasa del limite y falla un test que no tiene
+     * nada que ver con el rendimiento. Los criterios de velocidad reales
+     * se miden aparte y de forma explicita; este margen solo evita que la
+     * lentitud de la maquina se confunda con una regresion.
+     */
+    testTimeout: 20_000,
   },
 });
