@@ -1,0 +1,27 @@
+{
+  "name": "racquetball-trajectory-lab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Simulador de trayectorias de racquetball: 3D + tres vistas ortograficas 2D.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build && node scripts/inline.mjs",
+    "build:fast": "vite build && node scripts/inline.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build:artifact": "npm run build && node scripts/artifact.mjs"
+  },
+  "dependencies": {
+    "three": "0.186.0",
+    "lz-string": "1.5.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.186.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  }
+}

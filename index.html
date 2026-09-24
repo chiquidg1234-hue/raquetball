@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark light" />
+    <title>Racquetball Trajectory Lab</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span class="brand-text">
+            <strong>Racquetball</strong> Trajectory Lab
+          </span>
+        </div>
+        <nav class="layout-tabs" id="layout-tabs" aria-label="Vistas"></nav>
+        <div class="topbar-right" id="topbar-right"></div>
+      </header>
+
+      <main class="workspace">
+        <section class="viewports" id="viewports">
+          <div class="viewport viewport--3d" id="viewport-3d">
+            <div class="viewport-label">3D</div>
+            <div class="camera-presets" id="camera-presets"></div>
+            <canvas id="canvas3d"></canvas>
+          </div>
+          <div class="viewport viewport--plan" id="viewport-plan"></div>
+          <div class="viewport viewport--front" id="viewport-front"></div>
+          <div class="viewport viewport--side" id="viewport-side"></div>
+        </section>
+
+        <aside class="panel" id="panel">
+          <div class="panel-tabs" id="panel-tabs"></div>
+          <div class="panel-body" id="panel-body"></div>
+        </aside>
+      </main>
+
+      <footer class="timeline" id="timeline"></footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
