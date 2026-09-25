@@ -110,6 +110,10 @@ export const createInspectorPanel = (): PanelView => {
     el('div', { class: 'section-title', text: 'Que tiro es' }),
     verdict,
     el('div', { class: 'section-title', text: 'Botes de piso' }),
+    el('div', {
+      class: 'field-hint',
+      text: 'Arrastra los botes 1, 2 y 3 en la planta o en 3D: el tiro se recalcula mientras los mueves.',
+    }),
     floorsHost,
     el('div', { class: 'section-title', text: 'Resumen' }),
     stats,

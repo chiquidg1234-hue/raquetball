@@ -8,6 +8,7 @@ import {
   NAMED_TARGETS,
   frontWallAimPoint,
   mirrorSolution,
+  refineAim,
   solveAim,
   type AimTarget,
 } from '../src/core/solve.js';
@@ -335,5 +336,76 @@ describe('parada temprana del motor', () => {
     expect(floorsCut[1]!.point.x).toBe(floorsFull[1]!.point.x);
     expect(floorsCut[1]!.point.z).toBe(floorsFull[1]!.point.z);
     expect(cut.totalTime).toBeLessThan(full.totalTime);
+  });
+});
+
+describe('arrastre en vivo de los botes 1, 2 y 3', () => {
+  // El pase cruzado de la biblioteca, y cada bote arrastrado 1 m en pasos
+  // de 5 cm, como lo haria un dedo: cada paso parte del anterior.
+  const origin = v3(3.048, 0.9, 8.2);
+  const pass = resolvePreset(presetById('cross-court-left')!, origin, { model: 'ballistic', physics: {} });
+
+  // El 3.er bote de este pase cae despues de la pared del fondo: a unos
+  // 40 cm de arrastre el 2.o bote pasa a caer detras de ella y la familia
+  // de tiro cambia (test de abajo). Dentro de su familia se arrastra 30 cm.
+  const steps = { 1: 20, 2: 20, 3: 8 } as const;
+
+  for (const k of [1, 2, 3] as const) {
+    it(`el bote ${k} sigue al dedo: cada paso cae donde se pide, en milisegundos`, () => {
+      let angles: [number, number] = [pass.azimuthDeg, pass.elevationDeg];
+      const start = landing(origin, angles[0], angles[1], pass.speed, 'ballistic', k)!;
+      const times: number[] = [];
+      for (let i = 1; i <= steps[k]; i++) {
+        const target: AimTarget = {
+          x: start.point.x + i * 0.04,
+          z: start.point.z - i * 0.03,
+          bounceIndex: k,
+        };
+        const t0 = performance.now();
+        const r = refineAim({ origin, speed: pass.speed, model: 'ballistic' }, target, angles);
+        times.push(performance.now() - t0);
+        expect(r.ok, `paso ${i}`).toBe(true);
+        const hit = landing(origin, r.azimuthDeg, r.elevationDeg, pass.speed, 'ballistic', k)!;
+        expect(Math.hypot(hit.point.x - target.x, hit.point.z - target.z)).toBeLessThan(0.05);
+        angles = [r.azimuthDeg, r.elevationDeg];
+      }
+      // Mediana holgada: el criterio es que no se note al arrastrar.
+      times.sort((a, b) => a - b);
+      expect(times[Math.floor(times.length / 2)]!).toBeLessThan(40);
+    });
+  }
+
+  it('si el bote sale de lo que alcanza su familia de tiro, lo dice, y la busqueda completa encuentra otra', () => {
+    // Justo donde el 2.o bote cambia de lado de la pared del fondo, el mapa
+    // de angulos a botes da un salto: el Newton en vivo no puede cruzarlo
+    // (ok = false) y la vista lanza la busqueda completa.
+    const start = landing(origin, pass.azimuthDeg, pass.elevationDeg, pass.speed, 'ballistic', 3)!;
+    const target: AimTarget = { x: start.point.x + 0.56, z: start.point.z - 0.42, bounceIndex: 3 };
+    let angles: [number, number] = [pass.azimuthDeg, pass.elevationDeg];
+    let last = refineAim({ origin, speed: pass.speed, model: 'ballistic' }, target, angles);
+    for (let i = 1; i <= 14; i++) {
+      const step: AimTarget = {
+        x: start.point.x + (0.56 * i) / 14,
+        z: start.point.z - (0.42 * i) / 14,
+        bounceIndex: 3,
+      };
+      last = refineAim({ origin, speed: pass.speed, model: 'ballistic' }, step, angles);
+      if (last.ok) angles = [last.azimuthDeg, last.elevationDeg];
+    }
+    expect(last.ok).toBe(false);
+    const full = solveAim({ origin, speed: pass.speed, model: 'ballistic', seed: angles }, target);
+    expect(full.ok).toBe(true);
+  });
+
+  it('sigue siendo el mismo tipo de tiro mientras se arrastra', () => {
+    const start = landing(origin, pass.azimuthDeg, pass.elevationDeg, pass.speed, 'ballistic', 2)!;
+    const r = refineAim(
+      { origin, speed: pass.speed, model: 'ballistic' },
+      { x: start.point.x + 0.8, z: start.point.z - 0.5, bounceIndex: 2 },
+      [pass.azimuthDeg, pass.elevationDeg],
+    );
+    expect(r.ok).toBe(true);
+    expect(r.trajectory!.bounces[0]!.surface).toBe('front');
+    expect(Math.abs(r.azimuthDeg - pass.azimuthDeg)).toBeLessThan(10);
   });
 });

@@ -528,6 +528,8 @@ export class CourtView2D {
         { class: 'floor-grab', cx: pt.u, cy: pt.v, r: 0.42 },
         g,
       );
+      svgEl('title', {}, g).textContent =
+        `Bote ${c.label}: arrástralo y el tiro se recalcula mientras lo mueves`;
     }
     svgEl(
       'circle',

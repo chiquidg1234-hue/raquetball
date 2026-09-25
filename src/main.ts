@@ -228,6 +228,11 @@ const mount3D = (): void => {
   }
 
   attach3DInput(scene3d);
+  // Solo en el servidor de desarrollo, para las pruebas de navegador del
+  // arrastre en 3D. La build lo elimina (import.meta.env.DEV es false).
+  if (import.meta.env.DEV) {
+    (window as unknown as { __raquet: unknown }).__raquet = { scene: scene3d, state };
+  }
 
   const host = mustGet('camera-presets');
   for (const preset of CAMERA_PRESETS) {

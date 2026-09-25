@@ -326,6 +326,8 @@ export class TrajectoryLayer {
       c.primary || c.skip ? 0.95 : 0.5,
     );
     impact.position.set(x, 0.006, z);
+    // Los botes 1, 2 y 3 se arrastran tambien en 3D: se marcan para el raycast.
+    if (c.primary && !c.skip) impact.userData.floorBounce = c.floorIndex;
     this.gMarkers.add(impact);
 
     // Del 4.º bote en adelante, solo la marca en el suelo: sus numeros se
@@ -333,12 +335,18 @@ export class TrajectoryLayer {
     if (!c.primary && !c.skip) return;
     const sprite = makeContactSprite(c.skip ? 'PISO' : c.label, style);
     sprite.position.set(x, y + 0.36, z);
+    if (!c.skip) sprite.userData.floorBounce = c.floorIndex;
     this.gMarkers.add(sprite);
     if (c.rolling) {
       const roll = makeContactSprite('rueda', 'roll');
       roll.position.set(x, y + 0.66, z);
       this.gMarkers.add(roll);
     }
+  }
+
+  /** Los marcadores de los botes 1, 2 y 3, para agarrarlos con el puntero. */
+  floorBounceTargets(): THREE.Object3D[] {
+    return this.gMarkers.children.filter((o) => typeof o.userData.floorBounce === 'number');
   }
 
   setGhosts(list: readonly Trajectory[]): void {

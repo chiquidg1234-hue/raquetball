@@ -19,12 +19,13 @@
 
 import { SPEED } from '../core/constants.js';
 import { CENTER_BOX, clampToCourt } from '../core/court.js';
-import type { Vec3 } from '../core/types.js';
+import { CLASS_LABEL, classify } from '../core/rules.js';
+import type { SurfaceId, Vec3 } from '../core/types.js';
 import { CourtView2D } from '../render2d/courtSvg.js';
 import { pointerToViewBox } from '../render2d/svg.js';
-import { pickCourt } from '../render3d/pickers.js';
+import { pickCourt, pickFloorBounce, pickFloorPlane } from '../render3d/pickers.js';
 import type { Scene3D } from '../render3d/scene.js';
-import { solveAim, type BounceIndex } from '../core/solve.js';
+import { refineAim, solveAim, type BounceIndex } from '../core/solve.js';
 import { venueSimOptions } from '../core/venue.js';
 import { aimAt, state, update } from './state.js';
 import { showToast } from './toast.js';
@@ -66,6 +67,11 @@ const placeFloorBounce = (
   k: BounceIndex,
   x: number,
   z: number,
+  keep: { x: number; z: number }[] = state.trajectory.bounces
+    .filter((b) => b.surface === 'floor')
+    .slice(0, k - 1)
+    .map((b) => ({ x: b.point.x, z: b.point.z })),
+  firstSurface: SurfaceId | undefined = state.trajectory.bounces[0]?.surface,
 ): void => {
   const switchModel = k >= 2 && state.model === 'geometric';
   const model = switchModel ? 'ballistic' : state.model;
@@ -81,11 +87,8 @@ const placeFloorBounce = (
       // Partir del tiro actual, y de todas las soluciones quedarse con la
       // que menos mueve los botes anteriores: se mueve lo que se agarra.
       seed: [state.azimuthDeg, state.elevationDeg],
-      keepBounces: state.trajectory.bounces
-        .filter((b) => b.surface === 'floor')
-        .slice(0, k - 1)
-        .map((b) => ({ x: b.point.x, z: b.point.z })),
-      firstSurface: state.trajectory.bounces[0]?.surface,
+      keepBounces: keep,
+      firstSurface,
     },
     { x, z, bounceIndex: k },
   );
@@ -122,13 +125,176 @@ const placeFloorBounce = (
   showToast(host, parts.join(' · '), 'ok');
 };
 
+/**
+ * Arrastrar un bote de piso EN VIVO: mientras se mueve, el tiro se
+ * recalcula en cada fotograma con `refineAim` (Newton desde el tiro que ya
+ * se tenia: milisegundos) y la trayectoria sigue al dedo. Al soltar:
+ *   - si el ultimo calculo en vivo cayo donde se pedia, se queda ESE tiro
+ *     (lo que se ve es lo que queda) y en segundo plano se buscan las
+ *     otras formas de dejar el bote ahi, para el panel Apuntar;
+ *   - si no, se resuelve entero (barrido y ranking), como antes.
+ * Lo usan la planta y la vista 3D.
+ */
+interface BounceDrag {
+  k: BounceIndex;
+  /** Botes anteriores al empezar: los que el calculo final intenta conservar. */
+  keep: { x: number; z: number }[];
+  firstSurface: SurfaceId | undefined;
+  moved: boolean;
+  pending: { x: number; z: number } | null;
+  /** Ultimo punto pedido, resuelto o no. */
+  last: { x: number; z: number } | null;
+  frame: number | null;
+  lastOk: boolean;
+  /** Busqueda global en curso (cuando el Newton en vivo no alcanza). */
+  global: number | null;
+}
+
+const startBounceDrag = (k: BounceIndex, x: number, z: number): BounceDrag => {
+  update({ solveTarget: { x, z, bounceIndex: k } });
+  return {
+    k,
+    keep: state.trajectory.bounces
+      .filter((b) => b.surface === 'floor')
+      .slice(0, k - 1)
+      .map((b) => ({ x: b.point.x, z: b.point.z })),
+    firstSurface: state.trajectory.bounces[0]?.surface,
+    moved: false,
+    pending: null,
+    last: null,
+    frame: null,
+    lastOk: true,
+    global: null,
+  };
+};
+
+/** Un paso en vivo. Devuelve si el bote quedo donde se pedia. */
+const liveStep = (k: BounceIndex, x: number, z: number): boolean => {
+  const model = k >= 2 && state.model === 'geometric' ? 'ballistic' : state.model;
+  const r = refineAim(
+    {
+      origin: state.shot.origin,
+      speed: state.speed,
+      model,
+      physics: venueSimOptions(state.venue),
+      searchSpeed: state.solveSearchSpeed,
+    },
+    { x, z, bounceIndex: k },
+    [state.azimuthDeg, state.elevationDeg],
+  );
+  if (r.ok) {
+    update({
+      model,
+      azimuthDeg: r.azimuthDeg,
+      elevationDeg: r.elevationDeg,
+      speed: r.speed,
+      aim: r.aimPoint,
+      presetId: null,
+      solveTarget: { x, z, bounceIndex: k },
+      solveAlternatives: [],
+    });
+  } else {
+    update({ solveTarget: { x, z, bounceIndex: k } });
+  }
+  return r.ok;
+};
+
+/**
+ * Cuando el bote sale de lo que alcanza la familia de tiro actual (el 2.o
+ * bote pasa de caer antes a caer despues de la pared del fondo, por
+ * ejemplo), el Newton en vivo no puede seguir: el mapa de angulos a botes
+ * da un salto. Entonces, con el dedo aun quieto un instante, se busca en
+ * todo el abanico (`solveAim`, ~0.3 s) y el arrastre sigue en vivo desde
+ * la familia que se encuentre.
+ */
+const scheduleGlobal = (drag: BounceDrag): void => {
+  if (drag.global != null) return;
+  drag.global = window.setTimeout(() => {
+    drag.global = null;
+    const p = drag.last;
+    if (!p || drag.lastOk) return;
+    const r = solveAim(
+      {
+        origin: state.shot.origin,
+        speed: state.speed,
+        model: state.model,
+        physics: venueSimOptions(state.venue),
+        searchSpeed: state.solveSearchSpeed,
+        seed: [state.azimuthDeg, state.elevationDeg],
+        keepBounces: drag.keep,
+        firstSurface: drag.firstSurface,
+      },
+      { x: p.x, z: p.z, bounceIndex: drag.k },
+    );
+    if (!r.ok) return;
+    update({
+      azimuthDeg: r.azimuthDeg,
+      elevationDeg: r.elevationDeg,
+      speed: r.speed,
+      aim: r.aimPoint,
+      presetId: null,
+    });
+    drag.lastOk = true;
+  }, 140);
+};
+
+const moveBounceDrag = (drag: BounceDrag, x: number, z: number): void => {
+  drag.moved = true;
+  drag.pending = { x, z };
+  drag.last = { x, z };
+  if (drag.frame != null) return;
+  drag.frame = requestAnimationFrame(() => {
+    drag.frame = null;
+    const p = drag.pending;
+    drag.pending = null;
+    if (!p) return;
+    drag.lastOk = liveStep(drag.k, p.x, p.z);
+    if (!drag.lastOk) scheduleGlobal(drag);
+  });
+};
+
+const endBounceDrag = (host: HTMLElement, drag: BounceDrag, x: number, z: number): void => {
+  if (drag.frame != null) cancelAnimationFrame(drag.frame);
+  drag.frame = null;
+  if (drag.global != null) window.clearTimeout(drag.global);
+  drag.global = null;
+  if (!drag.moved) return;
+  if (liveStep(drag.k, x, z)) {
+    const label = CLASS_LABEL[classify(state.trajectory, state.shot.origin).classification];
+    showToast(host, `${ORDINAL[drag.k - 1]} bote colocado: ${label}`, 'ok');
+    // Las otras formas de dejarlo ahi, sin tocar el tiro que se ve.
+    window.setTimeout(() => {
+      const r = solveAim(
+        {
+          origin: state.shot.origin,
+          speed: state.speed,
+          model: state.model,
+          physics: venueSimOptions(state.venue),
+          seed: [state.azimuthDeg, state.elevationDeg],
+          keepBounces: drag.keep,
+          firstSurface: drag.firstSurface,
+        },
+        { x, z, bounceIndex: drag.k },
+      );
+      if (r.ok) update({ solveAlternatives: r.alternatives ?? [] });
+    }, 60);
+    return;
+  }
+  showToast(host, `Calculando dónde pegarle para el ${ORDINAL[drag.k - 1]} bote…`, 'info', 0);
+  // Un fotograma para que el aviso se pinte antes de resolver.
+  window.setTimeout(
+    () => placeFloorBounce(host, drag.k, x, z, drag.keep, drag.firstSurface),
+    30,
+  );
+};
+
 export const attachPlanInput = (view: CourtView2D): void => {
   const svg = view.svg;
   svg.classList.add('court2d--interactive');
   const reference = Math.min(view.projection.width, view.projection.height) * 0.75;
   let session: DragSession | null = null;
   /** Arrastre de un bote de piso: 1, 2 o 3. */
-  let bounceDrag: { k: BounceIndex; pointerId: number; moved: boolean } | null = null;
+  let bounceDrag: (BounceDrag & { pointerId: number }) | null = null;
   const host = (svg.parentElement ?? document.body) as HTMLElement;
 
   const toCourt = (e: PointerEvent): Vec3 => {
@@ -159,8 +325,7 @@ export const attachPlanInput = (view: CourtView2D): void => {
     const grabbed = (e.target as Element | null)?.closest?.('[data-floor-bounce]');
     const k = Number(grabbed?.getAttribute('data-floor-bounce'));
     if (grabbed && k >= 1 && k <= 3) {
-      bounceDrag = { k: k as BounceIndex, pointerId: e.pointerId, moved: false };
-      update({ solveTarget: { x: point.x, z: point.z, bounceIndex: k as BounceIndex } });
+      bounceDrag = { ...startBounceDrag(k as BounceIndex, point.x, point.z), pointerId: e.pointerId };
       svg.setPointerCapture(e.pointerId);
       e.preventDefault();
       return;
@@ -185,11 +350,9 @@ export const attachPlanInput = (view: CourtView2D): void => {
 
   svg.addEventListener('pointermove', (e) => {
     if (bounceDrag && e.pointerId === bounceDrag.pointerId) {
-      // Mientras se arrastra solo se mueve el objetivo; el tiro se
-      // recalcula al soltar, que resolver en cada movimiento seria lento.
+      // El tiro sigue al dedo: se recalcula en vivo en cada fotograma.
       const point = toCourt(e);
-      bounceDrag.moved = true;
-      update({ solveTarget: { x: point.x, z: point.z, bounceIndex: bounceDrag.k } });
+      moveBounceDrag(bounceDrag, point.x, point.z);
       return;
     }
     if (!session || e.pointerId !== session.pointerId) return;
@@ -209,14 +372,11 @@ export const attachPlanInput = (view: CourtView2D): void => {
 
   const end = (e: PointerEvent): void => {
     if (bounceDrag && e.pointerId === bounceDrag.pointerId) {
-      const { k, moved } = bounceDrag;
+      const drag = bounceDrag;
       bounceDrag = null;
       if (svg.hasPointerCapture(e.pointerId)) svg.releasePointerCapture(e.pointerId);
-      if (!moved) return;
       const point = toCourt(e);
-      showToast(host, `Calculando dónde pegarle para el ${ORDINAL[k - 1]} bote…`, 'info', 0);
-      // Un fotograma para que el aviso se pinte antes de resolver.
-      window.setTimeout(() => placeFloorBounce(host, k, point.x, point.z), 30);
+      endBounceDrag(host, drag, point.x, point.z);
       return;
     }
     if (!session || e.pointerId !== session.pointerId) return;
@@ -275,18 +435,59 @@ export const attachFrontInput = (view: CourtView2D): void => {
 };
 
 /**
- * En 3D el arrastre ya significa "orbitar la camara", asi que aqui solo
- * se interpreta el clic limpio: si el puntero se movio, era una orbita.
+ * En 3D el arrastre significa "orbitar la camara", salvo si empieza sobre
+ * un bote de piso 1, 2 o 3: entonces se arrastra el bote por el piso, con
+ * la camara quieta, y el tiro se recalcula en vivo como en la planta. Un
+ * clic limpio (sin moverse) coloca al jugador o apunta a la frontal.
  */
 export const attach3DInput = (scene: Scene3D): void => {
   const canvas = scene.renderer.domElement;
+  const host = (canvas.parentElement ?? document.body) as HTMLElement;
   let downAt: { x: number; y: number; id: number } | null = null;
+  let bounceDrag: (BounceDrag & { pointerId: number }) | null = null;
 
+  // En fase de captura: tiene que ir ANTES que el pointerdown de
+  // OrbitControls, que se registro primero en el mismo canvas, para poder
+  // quedarse con el gesto sin que la camara empiece a orbitar.
   canvas.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    const k = pickFloorBounce(scene, e);
+    if (k != null && k >= 1 && k <= 3) {
+      const at = pickFloorPlane(scene, e);
+      if (at) {
+        scene.controls.enabled = false;
+        bounceDrag = { ...startBounceDrag(k as BounceIndex, at.x, at.z), pointerId: e.pointerId };
+        canvas.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+    }
     downAt = { x: e.clientX, y: e.clientY, id: e.pointerId };
+  }, { capture: true });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!bounceDrag || e.pointerId !== bounceDrag.pointerId) return;
+    const at = pickFloorPlane(scene, e);
+    if (at) moveBounceDrag(bounceDrag, at.x, at.z);
+  });
+
+  const endDrag = (e: PointerEvent): boolean => {
+    if (!bounceDrag || e.pointerId !== bounceDrag.pointerId) return false;
+    const drag = bounceDrag;
+    bounceDrag = null;
+    scene.controls.enabled = true;
+    if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+    const at = pickFloorPlane(scene, e);
+    if (at) endBounceDrag(host, drag, at.x, at.z);
+    return true;
+  };
+  canvas.addEventListener('pointercancel', (e) => {
+    endDrag(e);
   });
 
   canvas.addEventListener('pointerup', (e) => {
+    if (endDrag(e)) return;
     if (!downAt || downAt.id !== e.pointerId) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     downAt = null;

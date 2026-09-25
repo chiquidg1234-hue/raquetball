@@ -603,6 +603,133 @@ export const solveAim = (
   return result;
 };
 
+/**
+ * Arrastre EN VIVO de un bote: Newton desde el tiro actual, sin barrido
+ * de semillas ni alternativas. Cada movimiento del puntero mueve el
+ * objetivo unos centimetros, asi que el tiro que ya se tenia esta en la
+ * cuenca buena: converge en 1-3 iteraciones (unas 10 simulaciones cortas,
+ * milisegundos). Si no converge, `ok` es false y la vista se queda con el
+ * ultimo tiro bueno; al soltar se resuelve entero con `solveAim`.
+ *
+ * Mantiene la familia de tiro (el pase sigue siendo pase mientras se
+ * arrastra) porque parte del tiro de antes: es lo que se espera al mover
+ * un bote con el dedo.
+ */
+export const refineAim = (
+  opts: SolveOptions,
+  target: AimTarget,
+  from: [number, number],
+  maxIterations = 6,
+): SolveResult => {
+  const tolerance = opts.tolerance ?? 0.05;
+  // Se afina a 1 cm aunque baste con 5: si cada paso se quedara justo en
+  // el borde de la tolerancia, el siguiente empezaria ya fuera y al rato
+  // el arrastre "se soltaria" sin haber cambiado de familia de tiro.
+  const inner = Math.min(tolerance, 0.01);
+  const n = newton(opts, target, from, opts.speed, maxIterations, inner);
+  let az = n.point[0];
+  let el = n.point[1];
+  let speed = opts.speed;
+  let ev = evaluate(opts, target, az, el, speed);
+  let iterations = n.iterations;
+
+  // Con esa fuerza no llega: si se deja buscar la velocidad, se mueve
+  // tambien la fuerza, lo minimo, para que el bote siga al dedo.
+  if (ev.cost > tolerance && opts.searchSpeed) {
+    const g = gaussNewton3(opts, target, [az, el, speed], maxIterations, inner);
+    iterations += g.iterations;
+    const evG = evaluate(opts, target, g.point[0], g.point[1], g.point[2]);
+    if (evG.cost < ev.cost) {
+      [az, el, speed] = g.point;
+      ev = evG;
+    }
+  }
+
+  const front = ev.trajectory.bounces.find((b) => b.surface === 'front');
+  return {
+    ok: ev.cost <= tolerance,
+    azimuthDeg: az,
+    elevationDeg: el,
+    speed,
+    error: ev.cost,
+    iterations,
+    method: 'newton',
+    aimPoint: front ? front.point : null,
+    trajectory: ev.trajectory,
+    note:
+      speed !== opts.speed
+        ? 'Arrastre en vivo: con la fuerza que habia no llegaba, asi que tambien se ajusta la velocidad.'
+        : 'Arrastre en vivo: Newton desde el tiro que ya tenias.',
+  };
+};
+
+/**
+ * Gauss-Newton de TRES variables (azimut, elevacion, velocidad) para dos
+ * residuos (x, z del bote): hay una variable de sobra, asi que cada paso
+ * es el de norma minima, delta = -J^T (J J^T)^-1 r, que cambia lo menos
+ * posible el tiro. 1 m/s pesa como 1 grado.
+ */
+const gaussNewton3 = (
+  opts: SolveOptions,
+  target: AimTarget,
+  seed: [number, number, number],
+  maxIterations: number,
+  tolerance: number,
+): { point: [number, number, number]; iterations: number } => {
+  const h: [number, number, number] = [0.2, 0.2, 0.3];
+  const vMin = 10;
+  const vMax = 90;
+  let p: [number, number, number] = [...seed];
+  let base = evaluate(opts, target, p[0], p[1], p[2]);
+  let iterations = 0;
+  for (; iterations < maxIterations; iterations++) {
+    if (!base.residual || base.cost < tolerance) break;
+    const r = base.residual;
+    const cols: [number, number][] = [];
+    for (let i = 0; i < 3; i++) {
+      const q: [number, number, number] = [...p];
+      q[i] = q[i]! + h[i]!;
+      const d = evaluate(opts, target, q[0], q[1], q[2]).residual;
+      if (!d) return { point: p, iterations };
+      cols.push([(d[0] - r[0]) / h[i]!, (d[1] - r[1]) / h[i]!]);
+    }
+    // J J^T (2x2) y su inversa.
+    let a = 0;
+    let b = 0;
+    let d = 0;
+    for (const [c0, c1] of cols) {
+      a += c0 * c0;
+      b += c0 * c1;
+      d += c1 * c1;
+    }
+    const det = a * d - b * b;
+    if (Math.abs(det) < 1e-12) break;
+    const y0 = (d * r[0] - b * r[1]) / det;
+    const y1 = (-b * r[0] + a * r[1]) / det;
+    const step = cols.map(([c0, c1]) => -(c0 * y0 + c1 * y1)) as [number, number, number];
+
+    let damping = 1;
+    let improved = false;
+    for (let k = 0; k < 6; k++) {
+      const q: [number, number, number] = [
+        p[0] + step[0] * damping,
+        p[1] + step[1] * damping,
+        Math.min(vMax, Math.max(vMin, p[2] + step[2] * damping)),
+      ];
+      const ev = evaluate(opts, target, q[0], q[1], q[2]);
+      if (ev.cost < base.cost) {
+        p = q;
+        base = ev;
+        improved = true;
+        break;
+      }
+      damping *= 0.5;
+    }
+    if (!improved) break;
+  }
+  return { point: p, iterations };
+};
+
 /** Familia (secuencia de contactos) y tipo de tiro de una solucion. */
 const describe = (
   opts: SolveOptions,
