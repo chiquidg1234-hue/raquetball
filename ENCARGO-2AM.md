@@ -1,4 +1,4 @@
-# Encargo para la sesión del 25-09-2026, 02:00 (Bolivia)
+# Encargo para la sesión programada (disparada a mano el 24-09 por la noche)
 
 > Escrito por la sesión anterior. Gael pidió que **todo el desarrollo ocurra en esa
 > sesión**, no antes. Aquí está el encargo completo, con lo que hay que investigar antes
@@ -12,6 +12,81 @@ contexto original. Lo de abajo es **encima de eso**, no en lugar de eso.
 terminar. Si un cambio de física los rompe, es porque el cambio está mal o porque el test
 codificaba una suposición que ya no vale — en ese segundo caso, actualiza el test Y
 explica en el commit por qué.
+
+---
+
+## PRIORIDAD 1 — Botes de piso y rebotes de pared: que no se confundan nunca
+
+> Añadido por Gael el 24-09 por la noche, con énfasis expreso. Va **antes que todo lo
+> demás** de construir: afecta a cómo se lee cada tiro, y no depende de la investigación.
+
+### El problema, tal como está hoy en el código
+
+Hoy **todos los contactos se numeran seguidos**, mezclando paredes y piso:
+`src/render2d/courtSvg.ts:366`, `src/render3d/trajectoryMesh.ts:213` y la tabla de
+`src/ui/inspector.ts:171` usan `b.index`, que cuenta cada contacto con cualquier
+superficie. En un Z serve eso sale como `1 frontal · 2 lateral · 3 piso`, y el "3" es en
+realidad **el primer bote**. Para un jugador eso es falso: en racquetball un **bote** es
+cuando la pelota toca el **piso**; tocar una pared sin tocar el piso es un **rebote de
+pared**, y son cosas completamente distintas. Lo que decide el punto es cuántas veces
+bota en el piso.
+
+El dato ya está bien en el motor (cada `Bounce` lleva su `surface`). El fallo es de
+lectura, no de física. **No toques el contrato `Trajectory`**: deriva todo de `surface`.
+
+### Qué tiene que hacer el sistema
+
+1. **Dos familias de marcadores, que se distingan de un vistazo**, en las tres vistas 2D,
+   en el 3D y en la tabla:
+   - **Botes de piso**: numerados aparte, **1, 2, 3…** contando SOLO el piso. Marcador
+     grande, color propio.
+   - **Rebotes de pared**: sin número de bote. Marcador distinto (otra forma, más pequeño)
+     con la inicial de la pared: **F** frontal, **I** izquierda, **D** derecha,
+     **T** trasera, **C** techo.
+   El Z serve tiene que leerse como `F → D → bote 1`, no como `1 → 2 → 3`.
+
+2. **Los tres primeros botes de piso son los que importan.** A Gael siempre le van a
+   importar más los botes 1, 2 y 3. Que destaquen: marcadores grandes y opacos, y del 4.º
+   en adelante pequeños y desvaídos. En el inspector, un bloque arriba con esos tres
+   botes (dónde cae cada uno en x/z, en qué instante, a qué velocidad llega), antes de la
+   tabla completa de contactos.
+
+3. **Poder mover dónde cae el SEGUNDO bote de piso.** Gael quiere arrastrar el marcador
+   del bote 2 en la planta y que el tiro se recalcule para que el segundo bote caiga
+   ahí. Ojo: **el segundo bote que da en el piso**, no el segundo contacto.
+   - El solver ya admite `bounceIndex: 2` (`src/core/solve.ts:37`), pero su test acepta
+     que no converja (`tests/solve.spec.ts`, bloque "segundo bote"). Hay que hacerlo
+     fiable, y cuando no haya solución decirlo en pantalla con el error en metros.
+   - Arrastrar el bote 2 mantiene fijos la posición del jugador y la velocidad y resuelve
+     azimut y elevación; con "buscar también la fuerza" activado, también la velocidad.
+   - Con el motor geométrico no hay segundo bote real (sin gravedad, lo que sube del piso
+     no vuelve a bajar salvo por el techo): al arrastrar el bote 2, pasa al balístico y
+     avísalo.
+   - Si da tiempo, lo mismo con los botes 1 y 3.
+
+4. **Si lo primero que toca la pelota es el piso, que se vea como piso.** Eso es un skip
+   y el punto se pierde. Hoy solo sale como una etiqueta en el panel lateral
+   (`src/ui/inspector.ts:65`). Tiene que verse **en la cancha**: marcador de advertencia
+   en rojo en el punto donde toca el piso con la palabra PISO, un aviso visible sobre las
+   vistas, y el resto de la trayectoria atenuada, porque a partir de ahí la jugada ya no
+   cuenta.
+
+5. **El bote del saque no es un bote del tiro.** Ejemplo de Gael, un **lob Z serve**:
+   primero botas la pelota con la mano, luego ejecutas el golpe, la pelota toca la
+   **frontal**, después la **lateral**, y **recién ahí da su primer bote**. El bote de la
+   mano (bloque 3 de este encargo) es otra cosa: se dibuja con su propio estilo, se
+   etiqueta como "bote de saque", y **no cuenta** como bote 1. La numeración de botes
+   empieza después del golpe.
+
+### Tests obligatorios de este bloque
+
+- Z serve: la secuencia legible es frontal → lateral → bote 1, y el bote 1 es el primer
+  contacto con `surface === 'floor'`.
+- Un tiro que toca el piso antes que la frontal se marca como skip en los datos de la
+  vista, no solo en el inspector.
+- Arrastrar el bote 2 a un punto alcanzable deja el segundo bote de piso a menos de 5 cm
+  de ese punto.
+- El bote de la mano en el saque no entra en la numeración de botes del tiro.
 
 ---
 
@@ -169,9 +244,9 @@ Qué construir:
 
 - Rama: crea `claude/fisica-avanzada-2am` desde la rama por defecto y trabaja ahí.
   Commits pequeños, uno por bloque, con el porqué en el mensaje, no el qué.
-- Orden sugerido: investigación → atmósfera y catálogos (con tests) → panel de cancha →
-  saque con lanzamiento → mano y raqueta 3D. Lo de arriba es lo que cambia los números;
-  lo de abajo es lo que se ve. Si el tiempo no llega para todo, que llegue en ese orden.
+- Orden: **botes de piso vs. rebotes de pared (prioridad 1)** → investigación →
+  atmósfera y catálogos (con tests) → panel de cancha → saque con lanzamiento → mano y
+  raqueta 3D. Si el tiempo no llega para todo, que llegue en ese orden.
 - **Compruébalo en un navegador de verdad**, no solo con tests. Hay Chromium en
   `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` y Playwright se instala en el
   scratchpad. La sesión anterior encontró así tres bugs que ningún test habría pillado
