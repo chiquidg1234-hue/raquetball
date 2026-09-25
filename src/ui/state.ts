@@ -23,7 +23,14 @@ import { presetById, resolvePreset } from '../core/presets.js';
 import type { Alternative, BounceIndex } from '../core/solve.js';
 import { fromShotDoc, fromVenueDoc, toDoc, type Doc, type ShotDoc } from '../persist/schema.js';
 import { DEFAULT_VENUE, venueSimOptions, type Venue } from '../core/venue.js';
-import { TOSS_DEFAULTS, simulateToss, type Toss, type TossParams } from '../core/serveToss.js';
+import {
+  TOSS_DEFAULTS,
+  TOSS_DROP,
+  normalizeToss,
+  simulateToss,
+  type Toss,
+  type TossParams,
+} from '../core/serveToss.js';
 import type { Handedness, Stroke } from '../core/stroke.js';
 import { fromAzimuthElevation, normalize, sub, v3 } from '../core/vec3.js';
 
@@ -116,11 +123,13 @@ const SHOT_KEYS: readonly (keyof AppState)[] = [
 const TOSS_KEYS: readonly (keyof AppState)[] = ['serveMode', 'serveToss', 'origin', 'venue'];
 
 /**
- * Donde se le pega de verdad a la pelota: en modo saque la altura la pone
- * el bote con la mano; si no, el slider.
+ * Donde se le pega de verdad a la pelota: en modo saque, donde este la
+ * pelota del lanzamiento al golpearla (x, y y z: lanzarla hacia delante
+ * mueve el golpe hacia delante); si no, los sliders. En modo saque los
+ * sliders de posicion dicen donde SUELTA la mano.
  */
 export const effectiveOrigin = (s: { origin: Vec3; toss: Toss | null }): Vec3 =>
-  s.toss ? { ...s.origin, y: s.toss.strike.point.y } : s.origin;
+  s.toss ? { ...s.toss.strike.point } : s.origin;
 
 export const deriveShot = (s: {
   origin: Vec3;
@@ -280,9 +289,16 @@ export const timelineStart = (): number => (state.toss ? -state.toss.duration : 
 export const currentDoc = (): Doc => {
   const doc = toDoc({ ...state, origin: state.shot.origin });
   if (state.serveMode) {
+    const r3 = (v: number): number => Math.round(v * 1000) / 1000;
+    const t = state.serveToss;
     doc.serve = {
-      r: Math.round(state.serveToss.releaseHeight * 1000) / 1000,
-      p: Math.round(state.serveToss.strikePhase * 1000) / 1000,
+      r: r3(t.releaseHeight),
+      p: r3(t.strikePhase),
+      s: r3(t.throwSpeed),
+      a: r3(t.throwAzimuthDeg),
+      d: r3(t.throwDownDeg),
+      x: r3(state.origin.x),
+      z: r3(state.origin.z),
     };
   }
   return doc;
@@ -294,10 +310,19 @@ export const applyDoc = (doc: Doc): boolean => {
   // Un documento v1 no trae cancha: se hizo con el aire de referencia.
   const patch: Partial<AppState> = { venue: fromVenueDoc(doc.venue), serveMode: !!doc.serve };
   if (doc.serve) {
-    patch.serveToss = {
-      releaseHeight: typeof doc.serve.r === 'number' ? doc.serve.r : TOSS_DEFAULTS.releaseHeight,
-      strikePhase: typeof doc.serve.p === 'number' ? doc.serve.p : TOSS_DEFAULTS.strikePhase,
-    };
+    const sv = doc.serve;
+    // Sin datos del lanzamiento es un enlace de antes: la pelota se soltaba.
+    const thrown = typeof sv.s === 'number';
+    patch.serveToss = normalizeToss({
+      releaseHeight: sv.r,
+      strikePhase: sv.p,
+      ...(thrown
+        ? { throwSpeed: sv.s, throwAzimuthDeg: sv.a, throwDownDeg: sv.d }
+        : TOSS_DROP),
+    });
+    if (typeof sv.x === 'number' && typeof sv.z === 'number') {
+      patch.origin = { ...state.origin, x: sv.x, z: sv.z };
+    }
   }
   update(patch);
   return true;
@@ -317,6 +342,30 @@ export const applyShotDoc = (doc: ShotDoc | unknown): boolean => {
 };
 
 /**
+ * Entrar o salir del modo saque. Al entrar, si el jugador esta fuera de la
+ * zona de saque (en pleno peloteo), se le lleva a su centro: desde ahi se
+ * suelta la pelota. Si ya estaba dentro, no se le mueve.
+ */
+export const toggleServeMode = (): void => {
+  if (state.serveMode) {
+    update({ serveMode: false });
+    return;
+  }
+  const z = state.origin.z;
+  const inside = z >= COURT.serviceLine && z <= COURT.shortLine;
+  update({
+    serveMode: true,
+    ...(inside
+      ? {}
+      : {
+          origin: { ...state.origin, z: (COURT.serviceLine + COURT.shortLine) / 2 },
+          presetId: null,
+          aim: null,
+        }),
+  });
+};
+
+/**
  * Carga un preset desde donde este parado el jugador. El preset decide el
  * punto de mira; el azimut y la elevacion salen de ahi. A partir de ese
  * momento los sliders mandan: cualquier cambio suelta el preset.
@@ -329,15 +378,17 @@ export const loadPreset = (id: string): void => {
   // En modo saque la altura de golpe la pone el bote con la mano, en el
   // sitio desde donde se saca: se calcula antes de apuntar.
   const spot = resolvePreset(preset, state.origin);
-  const strikeHeight = state.serveMode
-    ? simulateToss(spot.origin.x, spot.origin.z, state.serveToss, physics).strike.point.y
+  const strike = state.serveMode
+    ? simulateToss(spot.origin.x, spot.origin.z, state.serveToss, physics).strike.point
     : undefined;
   // Con el balistico se apunta para que el primer contacto caiga DE
   // VERDAD en el punto de mira (y al crack, en su franja), con el aire del
   // sitio de juego.
-  const resolved = resolvePreset(preset, state.origin, { model, physics, strikeHeight });
+  const resolved = resolvePreset(preset, state.origin, { model, physics, strike });
   update({
-    origin: resolved.origin,
+    // En modo saque la posicion es donde suelta la mano; el golpe lo pone
+    // el lanzamiento.
+    origin: state.serveMode ? spot.origin : resolved.origin,
     azimuthDeg: resolved.azimuthDeg,
     elevationDeg: resolved.elevationDeg,
     speed: resolved.speed,

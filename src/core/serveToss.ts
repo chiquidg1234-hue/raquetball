@@ -1,15 +1,20 @@
 /**
- * El saque de verdad: el sacador suelta la pelota, la deja botar UNA vez
- * dentro de la zona de saque y le pega en el primer rebote.
+ * El saque de verdad: el sacador lanza la pelota con la mano, la deja botar
+ * UNA vez dentro de la zona de saque y le pega en ese rebote.
  *
- * Reglamento IRF (INVESTIGACION.md, seccion 5):
+ * Reglamento IRF (INVESTIGACION.md, seccion 5 y 9):
  *   3.3    "La bola debe rebotar en el piso en la zona de servicio y
- *          despues del primer rebote ser golpeada por la raqueta."
+ *          despues del primer rebote ser golpeada por la raqueta", "without
+ *          the ball touching anything else".
  *   3.8(f) Botarla fuera de la zona de saque es falta.
  *
- * El lanzamiento se simula con el MISMO motor balistico que el tiro (el
- * mismo aire, el mismo piso), y de ahi salen la altura y el instante del
- * golpe: ya no se ponen a mano.
+ * El lanzamiento es SU PROPIO MOVIMIENTO (INVESTIGACION 9): la mano la
+ * suelta a una altura, con una fuerza y hacia un lado (adelante, en
+ * diagonal) o la deja caer ("drop the ball, don't bounce it", Cliff
+ * Swain). Se simula con el MISMO motor balistico que el tiro (el mismo
+ * aire, el mismo piso, con efecto), y el PUNTO DE CONTACTO (x, y, z) sale
+ * de donde esta la pelota al golpearla: ya no se pone a mano. Lanzarla
+ * hacia delante mueve el golpe hacia delante; mas alto, mas alto.
  *
  * El bote de la mano NO es un bote del tiro. Vive en su propia
  * `Trajectory`, separada, y nunca entra en la numeracion 1, 2, 3 de los
@@ -20,10 +25,20 @@ import { COURT } from './constants.js';
 import { simulateBallistic } from './engine-ballistic.js';
 import { stateAt } from './trajectory-utils.js';
 import type { Bounce, Sample, Trajectory, Vec3, VenuePhysics } from './types.js';
+import { fromAzimuthElevation } from './vec3.js';
 
 export interface TossParams {
   /** Altura del centro de la pelota al soltarla, en m. */
   releaseHeight: number;
+  /** Con que velocidad sale de la mano (m/s). 0 = dejarla caer. */
+  throwSpeed: number;
+  /**
+   * Hacia donde la lanza, en planta: 0 = hacia la frontal, positivo hacia
+   * la derecha, negativo hacia la izquierda (igual que el azimut del tiro).
+   */
+  throwAzimuthDeg: number;
+  /** Cuanto hacia abajo: 0 = horizontal, 90 = derecho al piso. */
+  throwDownDeg: number;
   /**
    * Cuando se le pega, medido en fases del rebote:
    *   0 = justo al botar, 1 = en lo mas alto, 2 = al volver a tocar el piso.
@@ -32,14 +47,35 @@ export interface TossParams {
   strikePhase: number;
 }
 
-export const TOSS_DEFAULTS: TossParams = { releaseHeight: 1.0, strikePhase: 0.8 };
+/**
+ * Por defecto un lanzamiento suave hacia delante y abajo: 1 m/s a 45
+ * grados. Bota ~0.3 m por delante de la mano y se le pega subiendo, ~0.4 m
+ * por delante de donde se solto.
+ */
+export const TOSS_DEFAULTS: TossParams = {
+  releaseHeight: 1.0,
+  throwSpeed: 1.0,
+  throwAzimuthDeg: 0,
+  throwDownDeg: 45,
+  strikePhase: 0.8,
+};
+
+/** Soltarla sin lanzarla, como se hacia antes. Los enlaces viejos abren asi. */
+export const TOSS_DROP: Pick<TossParams, 'throwSpeed' | 'throwAzimuthDeg' | 'throwDownDeg'> = {
+  throwSpeed: 0,
+  throwAzimuthDeg: 0,
+  throwDownDeg: 90,
+};
 
 export const TOSS_LIMITS = {
   releaseHeight: { min: 0.4, max: 2.0 },
+  throwSpeed: { min: 0, max: 6 },
+  throwAzimuthDeg: { min: -60, max: 60 },
+  throwDownDeg: { min: 0, max: 90 },
   strikePhase: { min: 0.05, max: 2.4 },
 } as const;
 
-export type TossFault = 'toss-outside' | 'double-bounce';
+export type TossFault = 'toss-outside' | 'double-bounce' | 'toss-wall';
 
 export interface Toss {
   params: TossParams;
@@ -50,7 +86,7 @@ export interface Toss {
    */
   path: Trajectory;
   release: Vec3;
-  /** El bote de saque: el unico contacto de `path`. */
+  /** El bote de saque: el primer contacto con el piso de `path`. */
   bounce: Bounce;
   apex: { point: Vec3; time: number };
   /** Cuando volveria a tocar el piso si nadie le pega. */
@@ -64,38 +100,53 @@ export interface Toss {
 const clamp = (v: number, lo: number, hi: number): number =>
   Math.min(hi, Math.max(lo, v));
 
+const num = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+
+/** Normaliza parametros de cualquier procedencia (URL, localStorage). */
+export const normalizeToss = (raw: Partial<TossParams> | null | undefined): TossParams => {
+  const r = raw ?? {};
+  const L = TOSS_LIMITS;
+  return {
+    releaseHeight: clamp(num(r.releaseHeight, TOSS_DEFAULTS.releaseHeight), L.releaseHeight.min, L.releaseHeight.max),
+    throwSpeed: clamp(num(r.throwSpeed, TOSS_DEFAULTS.throwSpeed), L.throwSpeed.min, L.throwSpeed.max),
+    throwAzimuthDeg: clamp(num(r.throwAzimuthDeg, TOSS_DEFAULTS.throwAzimuthDeg), L.throwAzimuthDeg.min, L.throwAzimuthDeg.max),
+    throwDownDeg: clamp(num(r.throwDownDeg, TOSS_DEFAULTS.throwDownDeg), L.throwDownDeg.min, L.throwDownDeg.max),
+    strikePhase: clamp(num(r.strikePhase, TOSS_DEFAULTS.strikePhase), 0, L.strikePhase.max),
+  };
+};
+
 /** Esta la marca del bote dentro de la zona de saque (lineas incluidas)? */
 export const inServiceZone = (z: number): boolean =>
   z >= COURT.serviceLine - 1e-9 && z <= COURT.shortLine + 1e-9;
 
 /**
- * Simula el bote con la mano en (x, z). `physics` es el aire y el piso del
- * sitio de juego: la misma pelota bota mas alto en una cancha que en otra
- * solo si el piso o el aire son otros.
+ * Simula el lanzamiento desde la mano en (x, z). `physics` es el aire y el
+ * piso del sitio de juego: la misma pelota bota mas alto en una cancha que
+ * en otra solo si el piso o el aire son otros.
  */
 export const simulateToss = (
   x: number,
   z: number,
-  params: TossParams,
+  params: Partial<TossParams>,
   physics: VenuePhysics = {},
 ): Toss => {
-  const releaseHeight = clamp(
-    params.releaseHeight,
-    TOSS_LIMITS.releaseHeight.min,
-    TOSS_LIMITS.releaseHeight.max,
-  );
-  const phase = clamp(params.strikePhase, 0, TOSS_LIMITS.strikePhase.max);
-  const release: Vec3 = { x, y: releaseHeight, z };
+  const p = normalizeToss(params);
+  const release: Vec3 = { x, y: p.releaseHeight, z };
+  const direction =
+    p.throwSpeed > 1e-6
+      ? fromAzimuthElevation(p.throwAzimuthDeg, -p.throwDownDeg)
+      : { x: 0, y: -1, z: 0 };
 
   // Hasta el tercer bote: el segundo marca el limite legal, y si el golpe
   // llega despues hay que tener por donde anda la pelota.
   const full = simulateBallistic(
-    { origin: release, direction: { x: 0, y: -1, z: 0 }, speed: 0 },
-    { ...physics, maxBounces: 3, maxTime: 6, sampleDt: 1 / 480 },
+    { origin: release, direction, speed: p.throwSpeed },
+    { ...physics, maxBounces: 6, maxTime: 6, sampleDt: 1 / 480, stopAfterFloorBounces: 3 },
   );
 
   const floors = full.bounces.filter((b) => b.surface === 'floor');
-  const bounce = floors[0]!;
+  const bounce = floors[0] ?? full.bounces[0]!;
   // Sin segundo bote (reposo): se toma el final de la simulacion.
   const secondBounceTime = floors[1]?.time ?? full.totalTime;
 
@@ -113,6 +164,7 @@ export const simulateToss = (
   }
   const apexPoint = stateAt(full, apexTime)?.p ?? bounce.point;
 
+  const phase = p.strikePhase;
   const rise = apexTime - bounce.time;
   const fall = secondBounceTime - apexTime;
   const strikeTime =
@@ -134,14 +186,20 @@ export const simulateToss = (
     model: 'ballistic',
   };
 
-  const fault: TossFault | null = !inServiceZone(bounce.point.z)
-    ? 'toss-outside'
-    : strikeTime >= secondBounceTime - 1e-9
-      ? 'double-bounce'
-      : null;
+  // "Without the ball touching anything else": una pared antes del golpe
+  // tambien es falta, y la primera en mirarse (lo que pase despues ya no
+  // es un saque).
+  const touchedWall = path.bounces.some((b) => b.surface !== 'floor');
+  const fault: TossFault | null = touchedWall
+    ? 'toss-wall'
+    : bounce.surface !== 'floor' || !inServiceZone(bounce.point.z)
+      ? 'toss-outside'
+      : strikeTime >= secondBounceTime - 1e-9
+        ? 'double-bounce'
+        : null;
 
   return {
-    params: { releaseHeight, strikePhase: phase },
+    params: p,
     path,
     release,
     bounce,

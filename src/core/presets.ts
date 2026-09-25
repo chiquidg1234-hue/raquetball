@@ -403,8 +403,11 @@ export interface PresetContext {
   model: PhysicsModel;
   /** El aire y la cancha del sitio de juego (venueSimOptions). */
   physics?: VenuePhysics;
-  /** En modo saque la altura de golpe la pone el bote con la mano. */
-  strikeHeight?: number;
+  /**
+   * En modo saque el punto de golpe lo pone el lanzamiento con la mano:
+   * donde este la pelota al golpearla (src/core/serveToss.ts).
+   */
+  strike?: Vec3;
 }
 
 export const resolvePreset = (
@@ -413,7 +416,7 @@ export const resolvePreset = (
   ctx?: PresetContext,
 ): ResolvedPreset => {
   const base = preset.origin ? preset.origin(current) : current;
-  const origin = ctx?.strikeHeight != null ? { ...base, y: ctx.strikeHeight } : base;
+  const origin = ctx?.strike ? { ...ctx.strike } : base;
   const target = preset.target(origin);
   const dx = target.x - origin.x;
   const dy = target.y - origin.y;

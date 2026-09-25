@@ -5,14 +5,21 @@ import { floorBounces, labelContacts, readableSequence } from '../src/core/conta
 import { simulate } from '../src/core/engine.js';
 import { judgeServe } from '../src/core/rules.js';
 import { PRESETS, resolvePreset } from '../src/core/presets.js';
-import { TOSS_DEFAULTS, inServiceZone, simulateToss } from '../src/core/serveToss.js';
+import {
+  TOSS_DEFAULTS,
+  TOSS_DROP,
+  inServiceZone,
+  normalizeToss,
+  simulateToss,
+} from '../src/core/serveToss.js';
 import { DEFAULT_VENUE, venueSimOptions, withPlace } from '../src/core/venue.js';
 import { fromAzimuthElevation, normalize, sub, v3 } from '../src/core/vec3.js';
 
 const physics = venueSimOptions(DEFAULT_VENUE);
 const spot = { x: COURT.width / 2 + 0.35, z: (COURT.serviceLine + COURT.shortLine) / 2 };
+/** Soltarla sin lanzarla: el bote de mano de antes, que estos tests describen. */
 const toss = (releaseHeight: number, strikePhase: number, at = spot) =>
-  simulateToss(at.x, at.z, { releaseHeight, strikePhase }, physics);
+  simulateToss(at.x, at.z, { releaseHeight, strikePhase, ...TOSS_DROP }, physics);
 
 describe('el bote con la mano', () => {
   it('cae, bota una vez en el piso y sube menos de lo que cayo', () => {
@@ -68,7 +75,12 @@ describe('el bote con la mano', () => {
 
   it('en El Alto el mismo bote sube un poco mas (menos aire)', () => {
     const sea = toss(1.5, 1);
-    const high = simulateToss(spot.x, spot.z, { releaseHeight: 1.5, strikePhase: 1 }, venueSimOptions(withPlace(DEFAULT_VENUE, 'elalto')));
+    const high = simulateToss(
+      spot.x,
+      spot.z,
+      { releaseHeight: 1.5, strikePhase: 1, ...TOSS_DROP },
+      venueSimOptions(withPlace(DEFAULT_VENUE, 'elalto')),
+    );
     expect(high.apex.point.y).toBeGreaterThan(sea.apex.point.y);
   });
 
@@ -76,6 +88,68 @@ describe('el bote con la mano', () => {
     const t = simulateToss(spot.x, spot.z, TOSS_DEFAULTS, physics);
     expect(t.strike.rising).toBe(true);
     expect(t.fault).toBeNull();
+  });
+});
+
+describe('el lanzamiento es su propio movimiento (INVESTIGACION 9)', () => {
+  // 1 m/s a 45 grados desde 1 m: 0.71 m/s hacia delante y 0.71 hacia
+  // abajo. Llega al piso en t = (-0.71 + sqrt(0.71^2 + 2 g 0.97))/g = 0.38 s,
+  // 0.27 m por delante de la mano. En el piso agarra: le queda el 61 % de
+  // lo que iba hacia delante, y se le pega subiendo un poco mas alla.
+  const thrown = simulateToss(spot.x, spot.z, TOSS_DEFAULTS, physics);
+
+  it('lanzada hacia delante bota por delante de la mano', () => {
+    const ahead = spot.z - thrown.bounce.point.z;
+    expect(ahead).toBeGreaterThan(0.2);
+    expect(ahead).toBeLessThan(0.35);
+    expect(thrown.bounce.point.x).toBeCloseTo(spot.x, 6);
+  });
+
+  it('el punto de golpe (x, y, z) sale del lanzamiento: mas adelante que el bote', () => {
+    const at = thrown.path.samples.at(-1)!.p;
+    expect(thrown.strike.point).toEqual(at);
+    expect(thrown.strike.point.z).toBeLessThan(thrown.bounce.point.z);
+    expect(spot.z - thrown.strike.point.z).toBeGreaterThan(0.3);
+    expect(thrown.strike.rising).toBe(true);
+    expect(thrown.fault).toBeNull();
+  });
+
+  it('mas fuerte, mas lejos; y si bota pasada la linea corta, falta', () => {
+    const soft = simulateToss(spot.x, spot.z, { ...TOSS_DEFAULTS, throwSpeed: 1 }, physics);
+    const firm = simulateToss(spot.x, spot.z, { ...TOSS_DEFAULTS, throwSpeed: 3, throwDownDeg: 30 }, physics);
+    expect(spot.z - firm.bounce.point.z).toBeGreaterThan(spot.z - soft.bounce.point.z + 0.4);
+    // 4 m/s casi horizontal: 3.8 m/s hacia delante durante 0.33 s, bota
+    // 1.2 m por delante, a z = 4.1: antes de la linea de servicio. Falta.
+    const hard = simulateToss(spot.x, spot.z, { ...TOSS_DEFAULTS, throwSpeed: 4, throwDownDeg: 20 }, physics);
+    expect(hard.bounce.point.z).toBeLessThan(COURT.serviceLine);
+    expect(hard.fault).toBe('toss-outside');
+  });
+
+  it('en diagonal el golpe se va hacia ese lado', () => {
+    const right = simulateToss(spot.x, spot.z, { ...TOSS_DEFAULTS, throwAzimuthDeg: 45 }, physics);
+    const left = simulateToss(spot.x, spot.z, { ...TOSS_DEFAULTS, throwAzimuthDeg: -45 }, physics);
+    expect(right.strike.point.x).toBeGreaterThan(spot.x + 0.1);
+    expect(left.strike.point.x).toBeLessThan(spot.x - 0.1);
+  });
+
+  it('si toca una pared antes del golpe, es falta ("without touching anything else")', () => {
+    const nearWall = { x: 0.35, z: spot.z };
+    const t = simulateToss(nearWall.x, nearWall.z, { ...TOSS_DEFAULTS, throwSpeed: 4, throwDownDeg: 10, throwAzimuthDeg: -90 }, physics);
+    expect(t.fault).toBe('toss-wall');
+  });
+
+  it('soltarla (fuerza 0) es el bote de antes: cae derecha', () => {
+    const drop = simulateToss(spot.x, spot.z, { ...TOSS_DEFAULTS, throwSpeed: 0 }, physics);
+    expect(drop.bounce.point.x).toBeCloseTo(spot.x, 9);
+    expect(drop.bounce.point.z).toBeCloseTo(spot.z, 9);
+  });
+
+  it('los parametros raros se sanean', () => {
+    const p = normalizeToss({ releaseHeight: 9, throwSpeed: -3, throwDownDeg: 200, strikePhase: Number.NaN });
+    expect(p.releaseHeight).toBe(2);
+    expect(p.throwSpeed).toBe(0);
+    expect(p.throwDownDeg).toBe(90);
+    expect(p.strikePhase).toBe(TOSS_DEFAULTS.strikePhase);
   });
 });
 
@@ -134,7 +208,7 @@ describe('los saques de la biblioteca con el bote de mano', () => {
       const r = resolvePreset(preset, undefined, {
         model: 'ballistic',
         physics,
-        strikeHeight: t.strike.point.y,
+        strike: t.strike.point,
       });
       const origin = r.origin;
       const shot = simulate(

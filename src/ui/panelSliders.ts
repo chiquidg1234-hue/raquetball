@@ -97,6 +97,9 @@ export const createShotPanel = (): PanelView => {
 
   // --------------------------------------------- saque: bote con la mano
 
+  const setToss = (patch: Partial<AppState['serveToss']>): void =>
+    update({ serveToss: { ...state.serveToss, ...patch }, presetId: null });
+
   const release = slider({
     field: 'toss-release',
     label: 'Altura a la que sueltas la pelota',
@@ -106,8 +109,46 @@ export const createShotPanel = (): PanelView => {
     value: state.serveToss.releaseHeight,
     format: metres,
     hint: 'Cuanto más alto la sueltas, más alto sube después del bote.',
-    onInput: (releaseHeight) =>
-      update({ serveToss: { ...state.serveToss, releaseHeight }, presetId: null }),
+    onInput: (releaseHeight) => setToss({ releaseHeight }),
+  });
+
+  const throwSpeed = slider({
+    field: 'toss-speed',
+    label: 'Fuerza del lanzamiento',
+    min: TOSS_LIMITS.throwSpeed.min,
+    max: TOSS_LIMITS.throwSpeed.max,
+    step: 0.1,
+    value: state.serveToss.throwSpeed,
+    format: (v) => (v < 0.05 ? 'soltarla (0)' : `${v.toFixed(1)} m/s`),
+    hint: '0 = dejarla caer ("drop the ball, don\'t bounce it"). Más fuerza, más lejos bota y más adelante le pegas.',
+    onInput: (throwSpeed) => setToss({ throwSpeed }),
+  });
+
+  const throwAzimuth = slider({
+    field: 'toss-azimuth',
+    label: 'Hacia dónde la lanzas',
+    min: TOSS_LIMITS.throwAzimuthDeg.min,
+    max: TOSS_LIMITS.throwAzimuthDeg.max,
+    step: 1,
+    value: state.serveToss.throwAzimuthDeg,
+    format: (v) =>
+      Math.abs(v) < 0.5
+        ? 'hacia la frontal'
+        : `${Math.abs(v).toFixed(0)}° a la ${v > 0 ? 'derecha' : 'izquierda'}`,
+    hint: 'En diagonal, el golpe se va hacia ese lado.',
+    onInput: (throwAzimuthDeg) => setToss({ throwAzimuthDeg }),
+  });
+
+  const throwDown = slider({
+    field: 'toss-down',
+    label: 'Hacia abajo',
+    min: TOSS_LIMITS.throwDownDeg.min,
+    max: TOSS_LIMITS.throwDownDeg.max,
+    step: 1,
+    value: state.serveToss.throwDownDeg,
+    format: (v) => `${v.toFixed(0)}°`,
+    hint: '0° = horizontal, 90° = derecho al piso.',
+    onInput: (throwDownDeg) => setToss({ throwDownDeg }),
   });
 
   const phase = slider({
@@ -120,21 +161,25 @@ export const createShotPanel = (): PanelView => {
     format: (v) =>
       v < 0.97 ? 'subiendo' : v <= 1.03 ? 'arriba' : v < 2 ? 'bajando' : 'tras 2.º bote',
     hint: 'Izquierda: recién botada, subiendo. Centro: lo más alto. Derecha del todo: ya botó dos veces, y eso es falta.',
-    onInput: (strikePhase) =>
-      update({ serveToss: { ...state.serveToss, strikePhase }, presetId: null }),
+    onInput: (strikePhase) => setToss({ strikePhase }),
   });
 
   const tossReadout = el('div', { class: 'toss-readout', 'data-readout': 'toss' });
   const tossSection = el('div', { class: 'toss-section' }, [
-    el('div', { class: 'section-title', text: 'Saque: bote con la mano' }),
+    el('div', { class: 'section-title', text: 'Saque: el lanzamiento con la mano' }),
     el('div', {
       class: 'field-hint',
-      text: 'La pelota se bota una vez en la zona de saque y se golpea en ese rebote (IRF 3.3). De aquí sale la altura de contacto.',
+      text: 'Es su propio movimiento: la sueltas o la lanzas (adelante, en diagonal), bota una vez en la zona de saque y le pegas en ese rebote (IRF 3.3). De aquí sale el punto de golpe: dónde, a qué altura y cuándo.',
     }),
     release.root,
+    throwSpeed.root,
+    throwAzimuth.root,
+    throwDown.root,
     phase.root,
     tossReadout,
   ]);
+
+  const labelOf = (h: SliderHandle): HTMLElement | null => h.root.querySelector('.field-label');
 
   const syncToss = (): void => {
     tossSection.hidden = !state.serveMode;
@@ -142,12 +187,24 @@ export const createShotPanel = (): PanelView => {
     if (heightInput) heightInput.disabled = !!state.toss;
     originY.root.classList.toggle('field--derived', !!state.toss);
     originY.set(state.shot.origin.y);
+    // En modo saque la posicion es la de la mano; el golpe lo pone el
+    // lanzamiento.
+    const x = labelOf(originX);
+    const z = labelOf(originZ);
+    if (x) x.textContent = state.toss ? 'Dónde la sueltas — ancho (X)' : 'Posicion — ancho (X)';
+    if (z) z.textContent = state.toss ? 'Dónde la sueltas — fondo (Z)' : 'Posicion — fondo (Z)';
     const t = state.toss;
     tossReadout.replaceChildren();
     if (!t) return;
     tossReadout.classList.toggle('toss-readout--fault', t.fault !== null);
+    const p = t.strike.point;
+    const moved = Math.hypot(p.x - t.release.x, p.z - t.release.z);
     const rows: [string, string][] = [
-      ['Contacto', `${t.strike.point.y.toFixed(2)} m, ${describeStrike(t)}`],
+      ['Golpe', `${p.y.toFixed(2)} m de alto, ${describeStrike(t)}`],
+      [
+        'Dónde',
+        `a ${p.z.toFixed(2)} m de la frontal, x = ${p.x.toFixed(2)}${moved > 0.02 ? ` (${moved.toFixed(2)} m desde la mano)` : ''}`,
+      ],
       ['Bote de saque', `a ${t.bounce.point.z.toFixed(2)} m de la frontal`],
       ['Desde que la sueltas', `${t.duration.toFixed(2)} s hasta el golpe`],
     ];
@@ -171,6 +228,13 @@ export const createShotPanel = (): PanelView => {
         el('div', {
           class: 'toss-fault',
           text: 'Falta: la pelota ya botó dos veces cuando le pegas.',
+        }),
+      );
+    } else if (t.fault === 'toss-wall') {
+      tossReadout.append(
+        el('div', {
+          class: 'toss-fault',
+          text: 'Falta: la pelota toca una pared antes del golpe. Tiene que botar y ser golpeada sin tocar nada más.',
         }),
       );
     }
@@ -208,6 +272,9 @@ export const createShotPanel = (): PanelView => {
       }
       if (changed.has('serveToss')) {
         release.set(state.serveToss.releaseHeight);
+        throwSpeed.set(state.serveToss.throwSpeed);
+        throwAzimuth.set(state.serveToss.throwAzimuthDeg);
+        throwDown.set(state.serveToss.throwDownDeg);
         phase.set(state.serveToss.strikePhase);
       }
       if (changed.has('toss') || changed.has('serveMode') || changed.has('shot')) syncToss();

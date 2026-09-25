@@ -398,7 +398,9 @@ export class TrajectoryLayer {
         ? 'saque: 2 botes'
         : toss.fault === 'toss-outside'
           ? 'saque: fuera'
-          : 'bote de saque';
+          : toss.fault === 'toss-wall'
+            ? 'saque: pared'
+            : 'bote de saque';
     const sprite = makeContactSprite(label, 'toss');
     // Al lado, no encima: encima esta la mano y, en el golpe, la raqueta.
     sprite.position.set(toss.bounce.point.x + 0.62, 0.16, toss.bounce.point.z);

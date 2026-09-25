@@ -52,6 +52,7 @@ import {
   timelineStart,
   state,
   subscribe,
+  toggleServeMode,
   update,
   type AppState,
   type LayoutId,
@@ -486,7 +487,7 @@ const mountTopbarRight = (): void => {
     title: 'Juzga el tiro como saque: corto, largo, tres paredes, techo.',
     text: 'Modo saque',
   });
-  serve.addEventListener('click', () => update({ serveMode: !state.serveMode }));
+  serve.addEventListener('click', () => toggleServeMode());
   host.appendChild(serve);
 
   const png = el('button', {

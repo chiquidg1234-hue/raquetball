@@ -428,6 +428,22 @@ escala con E, que no está medida: con una pelota más blanda salen más rollout
   dirección (adelante, en diagonal) y su fuerza. **El punto de contacto (x, y, z) sale de
   dónde está la pelota al golpearla**, no de un slider.
 
+**Las cuentas del lanzamiento** (mismo motor, aire y piso con efecto; `tests/serveToss.spec.ts`):
+
+| Lanzamiento desde 1.0 m | Bota | Golpe (fase 0.8, subiendo) |
+|---|---|---|
+| Soltarla (0 m/s) | debajo de la mano | encima del bote, a ~0.72 m |
+| 1 m/s a 45° hacia abajo (por defecto) | 0.27 m por delante: t = 0.38 s | ~0.40 m por delante, a ~0.73 m |
+| 2.5 m/s a 45°, 30° a la derecha | 0.45 m por delante | 0.87 m desde la mano, 0.43 m a la derecha |
+| 4 m/s a 15° | 1.35 m por delante | 2.05 m por delante: desde el centro de la zona, **bota fuera** |
+
+La primera fila de la tabla sale de t = (−v·sen θ + √((v·sen θ)² + 2·g·h))/g con
+h = 0.97 m (centro de la pelota a un radio del piso). En el piso la pelota agarra: le
+queda el 61 % de lo que iba hacia delante y sale con efecto liftado, por eso después del
+bote avanza menos de lo que avanzó en el aire. Lanzarla más fuerte mueve el golpe hacia
+delante, y puede sacarla de la zona de saque (falta, IRF 3.8 f). Si toca una pared antes
+del golpe, también es falta ("without the ball touching anything else").
+
 ## 10. La raqueta: Gearbox AXS
 
 "La axes" es la **serie AXS** de Gearbox, lanzada en julio de 2026

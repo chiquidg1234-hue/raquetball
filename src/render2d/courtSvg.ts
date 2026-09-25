@@ -399,7 +399,9 @@ export class CourtView2D {
     label.textContent = fault
       ? toss.fault === 'double-bounce'
         ? 'saque: 2 botes, falta'
-        : 'saque: fuera de zona'
+        : toss.fault === 'toss-wall'
+          ? 'saque: toca pared, falta'
+          : 'saque: fuera de zona'
       : 'bote de saque';
   }
 

@@ -33,7 +33,9 @@ export type ServeFault =
   /** El bote con la mano cae fuera de la zona de saque (IRF 3.8(f)). */
   | 'toss-outside'
   /** El golpe llega despues de que la pelota bote dos veces (IRF 3.3). */
-  | 'double-bounce';
+  | 'double-bounce'
+  /** El lanzamiento toca una pared antes del golpe (IRF 3.3, "anything else"). */
+  | 'toss-wall';
 
 export interface ServeJudgement {
   legal: boolean;
@@ -159,6 +161,13 @@ export const judgeServe = (
       'toss-outside',
       'falta: bote fuera de la zona',
       `La pelota bota a z=${toss.bounce.point.z.toFixed(2)} m; la zona de saque va de ${COURT.serviceLine.toFixed(2)} a ${COURT.shortLine.toFixed(2)} m (IRF 3.8 f).`,
+    );
+  }
+  if (toss?.fault === 'toss-wall') {
+    return fault(
+      'toss-wall',
+      'falta: el bote toca pared',
+      'Tras soltarla tiene que botar en la zona de saque y ser golpeada "without the ball touching anything else" (IRF 3.3).',
     );
   }
   if (toss?.fault === 'double-bounce') {

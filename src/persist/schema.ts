@@ -95,6 +95,19 @@ export interface ServeDoc {
   r: number;
   /** momento del golpe, en fases del rebote */
   p: number;
+  /**
+   * El lanzamiento con la mano (ronda 2): fuerza (m/s), azimut y angulo
+   * hacia abajo (grados). Los enlaces de antes no lo traen: eran soltarla.
+   */
+  s?: number;
+  a?: number;
+  d?: number;
+  /**
+   * Donde suelta la mano. El tiro guarda el punto de GOLPE; con un
+   * lanzamiento hacia delante el golpe no esta encima de la mano.
+   */
+  x?: number;
+  z?: number;
 }
 
 export interface Doc {
