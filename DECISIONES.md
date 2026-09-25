@@ -121,3 +121,58 @@ construido: la pantalla decia "azimut 0°" mientras dibujaba un tiro a -24°.
 El redibujo de arranque pasaba a los paneles un conjunto de cambios **vacio** en vez del
 conjunto completo de claves, asi que ningun panel se refrescaba. Solo se ve abriendo un
 enlace compartido en una pestana nueva y comparando el numero con el dibujo.
+
+---
+
+# Decisiones del encargo del 24-09 (física, saque y raqueta)
+
+Las fuentes de cada número están en [INVESTIGACION.md](INVESTIGACION.md).
+
+## El COR se saca de la norma CON aire
+
+El COR se había calculado con `sqrt(70/100) = 0.837`, que supone que no hay aire. El
+motor sí tiene aire, y al hacer la prueba de homologación dentro de él la pelota rebotaba
+a **64.6 in**: no pasaba su propia norma (68-72 in). La caída y la subida verticales con
+arrastre cuadrático tienen solución cerrada (`corFromDropTest` en `atmosphere.ts`); con
+ella el rango legal es 0.859-0.885 y la pelota de referencia vale 0.872. Dos tests que
+codificaban la suposición vieja se reescribieron, no se borraron.
+
+## Las superficies arrancan iguales
+
+No hay ni una medida publicada del rebote de una pelota de racquetball contra panel,
+revoque, cristal, madera o cemento. La patente de los paneles dice que rebotan "igual" que
+el hormigón. La hipótesis del encargo ("el hormigón devuelve más y raspa más") no tiene
+respaldo, así que no se codifica como dato: todas las superficies empiezan con factor 1 y
+se calibran a mano en el panel Cancha. "Cancha de placa" no aparece definida en ninguna
+fuente; se ofrecen las dos lecturas con nombre descriptivo.
+
+## El contacto del revés va más adelantado, no menos
+
+El encargo decía que la derecha se golpea más adelantada que el revés. Las guías dicen:
+derecha a la altura del talón delantero; revés igual o "justo por delante del pie
+adelantado" (Rocky Carson). Se modela lo que dicen las fuentes y un test lo fija.
+
+## El bote de la mano vive en su propia Trajectory
+
+El saque se simula con el mismo motor, pero en una `Trajectory` aparte. Así es imposible
+que su bote entre en la numeración del tiro, que es lo que Gael pidió con el ejemplo del
+lob Z serve. En modo saque la altura de contacto la da ese bote; los documentos guardan el
+origen EFECTIVO y los parámetros del saque, para que un enlace reproduzca el mismo tiro.
+
+## El Z serve baja de 42 a 39 m/s
+
+Con la pelota corregida (más viva) el preset Z serve quedaba al borde del saque largo:
+legal con contacto a 0.72 m, largo a 0.65. A 39 m/s es legal con cualquier contacto entre
+0.55 y 1.05 m, y un test lo vigila con la altura que da el bote de mano por defecto.
+
+## Documento v2, que sigue leyendo los v1
+
+El sitio de juego viaja en la URL y en el JSON (`venue`), y el saque también (`serve`).
+Un documento v1 no trae cancha: se lee con la de referencia (nivel del mar, 20 °C), que es
+el aire con el que se hizo.
+
+## Velocidades de radar
+
+Todas las lecturas publicadas son de radar, que marca el pico, es decir la velocidad a la
+salida de la raqueta. El "saque pro 75-85 m/s" del spec era nivel récord; un pro normal
+saca a 63-72 m/s. El máximo del slider pasa de 90 a 85 m/s (~190 mph).
