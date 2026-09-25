@@ -250,3 +250,168 @@ pone el del revés un poco **más** adelante, no más atrás. El modelo 3D pone 
 altura del talón delantero y el revés justo delante de la punta del pie adelantado. No
 existe una distancia en centímetros publicada, así que el pie se dibuja como referencia
 visual, marcado como aproximado.
+
+---
+
+# Segunda ronda (26-09): efecto, rollout, saque, raqueta
+
+Gael encontró que el simulador "calcula mal los tiros": el Z no hace su efecto, el
+tiro al crack no sale rollout, el bote de saque no es un movimiento propio y la raqueta
+no enseña cómo se pega. Todo lo de abajo son cuentas antes de programar.
+
+## 7. El efecto (spin) en los rebotes
+
+### El modelo físico
+
+Hasta ahora el motor aplicaba a la velocidad paralela a la pared un factor fijo
+(0.65) y la pelota no giraba. Eso no es física. Los rebotes oblicuos de pelotas de goma
+se describen con un modelo de impulsos con fricción, "agarre o deslizamiento"
+([Cross 2002, Grip-slip behavior of a bouncing ball](https://www.physics.usyd.edu.au/~cross/PUBLICATIONS/GripSlip.pdf);
+[Cross 2002, horizontal COR](https://physics.umd.edu/courses/Phys405/Hill/Fall05/Information/AJP/AJP00482.pdf)):
+
+```
+n  = normal de la superficie (hacia la cancha),  r = −R·n  (del centro al contacto)
+u  = v + ω × r                  velocidad del punto de contacto
+Jn = m·(1 + e)·|v·n|            impulso normal (e = COR, 0.872)
+Jt(agarre) = −m·α·(1 + eₓ)·u_t / (1 + α)      deja el punto de contacto en −eₓ·u_t
+si |Jt(agarre)| > μ·Jn  →  desliza:  Jt = −μ·Jn·û_t
+v' = v + (Jn·n + Jt)/m        ω' = ω + (r × Jt)/(α·m·R²)
+```
+
+- **α = I/(mR²)** de un cascarón esférico grueso ([PNAS 2025, SI, ec. 8](https://arxiv.org/html/2503.03906v1)):
+  `α = (2/5)·(1 − (1−2T/D)⁵)/(1 − (1−2T/D)³)`. La pared no está publicada: con la masa
+  (39.7 g), el diámetro (57.15 mm) y un compuesto de goma de 1.1–1.2 g/cm³ sale
+  T ≈ 3.7–4.1 mm. Con T = 3–5 mm, α = 0.60–0.56: **α = 0.58**. (Macizo: 0.4; cáscara
+  fina: 0.667.)
+- **eₓ y μ, medidos con una pelota de racquetball de verdad**
+  ([Illouz 2014, 600 fps](https://www.isjos.org/pdfs/ISJOS_v8_p5.pdf)): soltada desde
+  70.3 cm (3.71 m/s) sobre madera inclinada, gira a **ω = (81 ± 10)·sin θ rad/s** y no
+  desliza hasta ~50–60°; a 80° el giro solo cae ~10 %.
+  - Con el modelo, el giro al agarrar es `ω = (1+eₓ)·v·sin θ/((1+α)R)` = (1+eₓ)·82 sin θ.
+    El dato da **eₓ ≈ 0 ± 0.12**. Cross da 0.1–0.2 para una pelota de tenis. Se usa **eₓ = 0.05**.
+  - Deslizar a 80° perdiendo solo un 10 % de giro exige **μ ≈ 1.0**; con μ = 0.5 perdería
+    el 60 %. Se usa **μ = 0.9** en paredes y piso (goma sobre superficie dura; Cross mide
+    μ ≥ 0.9 para una superbola). Es calibrable por superficie.
+
+### El efecto del Z, con números
+
+Lo que describe Gael está documentado: el Z-ball "rebounds almost parallel to the back
+wall because of the spin" ([racquetballrules.us](https://www.racquetballrules.us/racquetball-shots/)),
+y en las laterales "the angle of incidence does not equal the angle of reflection; after
+repeated bounces it moves at a normal to the wall"
+([Physics Forums](https://www.physicsforums.com/threads/racquetballs-strange-bouncing-patterns.483866/)).
+
+El modelo lo predice sin ajustar nada:
+
+1. **Primera lateral** (sin giro previo): la pelota agarra. La velocidad a lo largo de la
+   pared baja a `1 − α(1+eₓ)/(1+α)` = **61 %** y la pelota sale girando alrededor del eje
+   vertical, con `Rω = 0.61·v_t`.
+2. **El piso no toca ese giro**: el punto de contacto con el piso está en el eje vertical,
+   así que ω_y no mueve ese punto y la fricción del piso no lo frena.
+3. **Segunda lateral** (la opuesta): el punto de contacto está al otro lado de la pelota,
+   así que ahora el giro **se suma** al deslizamiento: `u_t = v_t + 0.61·v_t = 1.61·v_t`.
+   La velocidad a lo largo de la pared queda en `1 − α(1+eₓ)·1.61/(1+α)` = **38 %** de la
+   que traía, mientras la normal conserva el 87 %.
+4. Una pelota que llega a 45° sale a **~23°** de la normal en vez de a 45°: casi
+   perpendicular a la lateral, es decir **casi paralela a la trasera**.
+
+### Magnus en vuelo: no se modela, y por qué
+
+A los números de Reynolds del racquetball (1–3·10⁵) una esfera lisa está en la zona
+crítica: la sustentación por giro puede ser positiva, nula o **negativa** (Magnus
+inverso) según el giro y la velocidad
+([Kim et al., JFM 2014](https://doi.org/10.1017/jfm.2014.428)). No hay ninguna medida
+con pelota de racquetball, y los efectos que describe Gael ocurren en los contactos. Se
+deja fuera del vuelo y se dice aquí. El giro en vuelo se conserva (su frenado en 1–2 s es
+pequeño y tampoco está medido).
+
+## 8. El rollout al crack (nick)
+
+[Ravisankar et al., PNAS 2025, "The mechanics of the squash nick shot"](https://www.pnas.org/doi/10.1073/pnas.2505715122)
+([arXiv con el apéndice](https://arxiv.org/html/2503.03906v1)) midieron con cañón de aire y
+5000 fps por qué la pelota sale rodando. La pelota tiene que tocar **primero la pared**,
+con el centro a una altura **0.6 < H/D < 0.75**. Mientras está aplastada contra la pared
+rueda hacia abajo sobre ella; si toca el piso **antes de terminar de rodar**, las dos
+fricciones se oponen, el giro y la velocidad vertical se anulan y la pelota sale **en
+horizontal, sin bote**. El criterio es `τ = t_rodadura / t_contacto < 1`:
+
+```
+t_c = 3.29·(m²/(D·E²·U₀·cos θ₀))^(1/5)        contacto de Hertz
+t_r = H·(4κ+1)/(U₀·sin θ₀ + 2κ·D·ω₀)          κ = α/4
+τ   = β·H*·Ca^(2/5)·(cos θ₀)^(1/5)/(sin θ₀ + 2κω*),   Ca = E/(ρ_bola·U₀²)
+```
+
+Para racquetball: β = 0.623 (con κ = 0.1455), ρ_bola = 6m/(πD³) = 406 kg/m³, y la banda
+H* = 0.6–0.75 es un centro a **34–43 mm** del piso (el borde inferior a 6–14 mm).
+
+- **E (rigidez efectiva) no está publicada para racquetball.** En el paper E sale de la
+  compresión de la pelota: `E = 4k/(πD)`. Comprobación: la rigidez homologada de la
+  pelota de squash (3.2 N/mm) da 102 kPa, igual que su medida (99–105 kPa). Para
+  racquetball se estima **k ≈ 2 N/mm → E ≈ 45 kPa**: una pelota más grande, de pared
+  relativamente más fina y claramente más fácil de apretar con la mano. Es una
+  estimación, y se puede calibrar.
+- Con E = 45 kPa, a 40 m/s y H* = 0.65 hace rollout si baja con **θ₀ ≳ 8–10°**. Un kill
+  plano desde la rodilla baja a unos 3°: τ ≈ 2.6, así que no hace nick, pero la
+  fricción de la frontal le quita el 38 % de la velocidad vertical y lo convierte en
+  efecto hacia delante, y sale rasante.
+
+## 9. El bote de saque es su propio movimiento
+
+- La regla (USAR 3.x, [texto oficial](https://www.usaracquetball.com/play/rules/3-play-regulations)):
+  "after the ball leaves the hand, it must bounce on the floor in the service zone and
+  then, without the ball touching anything else, be struck by the racquet before the
+  ball bounces on the floor a second time". Sacar sin bote ("tossing the ball into the
+  air") es falta.
+- Técnica: Cliff Swain, "drop the ball, don't bounce it"
+  ([racquetball-lessons.com](https://racquetball-lessons.com/2015/02/06/cliff-swains-racquetball-drive-serve/));
+  Rocky Carson suelta la pelota "off front foot" y da un paso largo hacia ella
+  ([RacquetWorld](https://store.racquetworld.com/mm5/merchant.mvc?Category_Code=RockyVideoTip3&Screen=CTGY));
+  para cambiar la dirección se suelta 8–12 in más atrás
+  ([racquetball-lessons.com](http://racquetball-lessons.com/2016/12/09/hitting-drive-serves-to-forehand-side/)).
+- Consecuencia para el modelo: el lanzamiento tiene su propio punto de suelta, su
+  dirección (adelante, en diagonal) y su fuerza. **El punto de contacto (x, y, z) sale de
+  dónde está la pelota al golpearla**, no de un slider.
+
+## 10. La raqueta: Gearbox AXS
+
+"La axes" es la **serie AXS** de Gearbox, lanzada en julio de 2026
+([Gearbox](https://gearboxsports.com/pages/axs-series), [JT-RB](https://jt-rb.com/axs-series/)).
+Conrrado Moscoso juega la **AXS 170 Teardrop**.
+
+| Dato (AXS 170 Teardrop) | Valor | Fuente |
+|---|---|---|
+| Peso sin cordaje | 170 g | [Gearbox](https://gearboxsports.com/products/axs-170-teardrop-blue) |
+| Balance | 13 mm hacia la cabeza | ídem |
+| Cordaje | monofilamento 18 g, transparente | ídem |
+| Superficie encordada | 107 in² (0.069 m²) | [RacquetWorld](https://store.racquetworld.com/gearbox-axs-170-teardrop-blue-purple-racquetball-racquet.html) |
+| Largo | 22 in (máximo reglamentario; GX1 de Gearbox, 22 in) | [RacquetGuys](https://racquetguys.ca/products/gearbox-gx1-170-quadraform) |
+| Teardrop | "higher sweet spot" | Gearbox |
+| Quad | "expanded sweet spot" | RacquetWorld |
+
+Gearbox no publica ni el ancho de la cabeza ni el patrón de cuerdas de la AXS (la GX1
+era 14×19). El dibujo usa la superficie y el largo publicados y una forma de lágrima
+aproximada.
+
+**Dónde pegarle, con física de impacto**
+([Cross, impacto de implementos](https://www.physics.usyd.edu.au/~cross/PUBLICATIONS/24.%20ObliqueImpact.PDF)).
+El punto de máxima salida no es el centro de la cabeza:
+
+```
+masa efectiva en el punto x:   1/Mₑ = 1/M + (x − x_cm)²/I_cm
+COR aparente:                  e_A = (e·Mₑ − m)/(Mₑ + m)
+salida (saque, bola casi quieta):  v = (1 + e_A)·Ω·(x − x_pivote)
+```
+
+Hacia la punta la raqueta va más rápida (Ω·x) pero su masa efectiva cae. El máximo
+queda en la mitad superior de la cabeza de una raqueta cargada de cabeza, justo lo que
+Gearbox llama "sweet spot más alto". La distribución de masa se reconstruye con los
+datos publicados (170 g, 13 mm HH, 22 in).
+
+**Velocidad de cabeza.** No hay medida publicada para racquetball, pero se deduce: para
+sacar a 67 m/s (150 mph) con Mₑ ≈ 0.10 kg hace falta que la raqueta vaya a **~50 m/s**
+en el punto de impacto. Es del orden del smash de bádminton, 52–56 m/s
+([King et al.](https://mdpi-res.com/d_attachment/applsci/applsci-10-01248/article_deploy/applsci-10-01248.pdf?version=1581582279)).
+
+**Slice.** Un golpe cortado es la cara moviéndose en oblicuo respecto a su normal. El
+mismo modelo de agarre, ahora pelota contra cuerdas, da el giro de salida, y ese giro
+viaja con el tiro y cambia cada rebote.
