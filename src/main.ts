@@ -332,7 +332,11 @@ const mountRacquetBar = (): void => {
   spot.addEventListener('change', () => update({ hitSpot: spot.value as HitSpot, presetId: null }));
   bar.appendChild(spot);
   const caption = el('div', { class: 'racquet-caption', id: 'racquet-caption' });
-  host.append(bar, caption);
+  caption.title = 'Toca para verlo entero';
+  caption.addEventListener('click', () => caption.classList.toggle('racquet-caption--open'));
+  const dock = el('div', { class: 'racquet-dock' });
+  dock.append(caption, bar);
+  host.append(dock);
 };
 
 /** Una linea con lo que ensena la raqueta: donde se le pega y que pide. */
