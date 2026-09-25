@@ -13,6 +13,13 @@
 import * as THREE from 'three';
 
 import { BALL, SPEED } from '../core/constants.js';
+import {
+  floorCountPerSegment,
+  isSkip,
+  labelContacts,
+  segmentOpacity,
+  type Contact,
+} from '../core/contacts.js';
 import { splitByBounce, stateAt } from '../core/trajectory-utils.js';
 import type { Sample, Trajectory, Vec3 } from '../core/types.js';
 import { length } from '../core/vec3.js';
@@ -54,26 +61,51 @@ export const speedColor = (
   return target.copy(RAMP[RAMP.length - 1]!.color);
 };
 
-const makeNumberSprite = (n: number): THREE.Sprite => {
+type ContactStyle = 'floor' | 'wall' | 'skip';
+
+/**
+ * Marcador flotante de un contacto. Dos familias que no se confunden:
+ * el bote de PISO es un circulo dorado con su numero; el rebote de PARED
+ * es un rombo oscuro con la inicial de la pared. El skip, en rojo.
+ */
+const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => {
   const size = 128;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
+  const c = size / 2;
 
-  ctx.beginPath();
-  ctx.arc(size / 2, size / 2, size * 0.36, 0, Math.PI * 2);
-  ctx.fillStyle = '#090d13';
-  ctx.fill();
-  ctx.lineWidth = size * 0.06;
-  ctx.strokeStyle = '#4dd4ac';
-  ctx.stroke();
+  if (style === 'wall') {
+    const h = size * 0.34;
+    ctx.beginPath();
+    ctx.moveTo(c, c - h);
+    ctx.lineTo(c + h, c);
+    ctx.lineTo(c, c + h);
+    ctx.lineTo(c - h, c);
+    ctx.closePath();
+    ctx.fillStyle = '#090d13';
+    ctx.fill();
+    ctx.lineWidth = size * 0.055;
+    ctx.strokeStyle = '#8ea5be';
+    ctx.stroke();
+    ctx.fillStyle = '#8ea5be';
+  } else {
+    ctx.beginPath();
+    ctx.arc(c, c, size * 0.38, 0, Math.PI * 2);
+    ctx.fillStyle = style === 'skip' ? '#ef5f5f' : '#ffc94d';
+    ctx.fill();
+    ctx.lineWidth = size * 0.05;
+    ctx.strokeStyle = '#090d13';
+    ctx.stroke();
+    ctx.fillStyle = style === 'skip' ? '#ffffff' : '#1c1405';
+  }
 
-  ctx.fillStyle = '#e8edf4';
-  ctx.font = `600 ${size * 0.42}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+  const fontSize = label.length > 2 ? size * 0.24 : size * 0.44;
+  ctx.font = `800 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(String(n), size / 2, size / 2 + size * 0.02);
+  ctx.fillText(label, c, c + size * 0.02);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -82,17 +114,37 @@ const makeNumberSprite = (n: number): THREE.Sprite => {
       map: texture,
       depthTest: false,
       transparent: true,
+      opacity: 1,
     }),
   );
-  sprite.scale.setScalar(0.42);
-  sprite.renderOrder = 10;
+  const scale = style === 'floor' || style === 'skip' ? 0.46 : 0.3;
+  sprite.scale.setScalar(scale);
+  sprite.renderOrder = style === 'wall' ? 9 : 10;
   return sprite;
+};
+
+/** Marca de impacto en el piso: un anillo plano donde bota la pelota. */
+const makeFloorImpact = (color: number, radius: number, opacity: number): THREE.Mesh => {
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(radius * 0.55, radius, 36),
+    new THREE.MeshBasicMaterial({
+      color,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+    }),
+  );
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 4;
+  return ring;
 };
 
 /** Tubo de un tramo, con color por vertice segun la velocidad. */
 const buildSegmentTube = (
   samples: Sample[],
   ghost: boolean,
+  opacity = 1,
 ): THREE.Mesh | null => {
   if (samples.length < 2) return null;
 
@@ -138,7 +190,12 @@ const buildSegmentTube = (
 
   return new THREE.Mesh(
     geometry,
-    new THREE.MeshBasicMaterial({ vertexColors: true }),
+    new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: opacity < 1,
+      opacity,
+      depthWrite: opacity >= 1,
+    }),
   );
 };
 
@@ -196,29 +253,55 @@ export class TrajectoryLayer {
     disposeTree(this.gMarkers);
     if (!trajectory) return;
 
-    for (const segment of splitByBounce(trajectory)) {
-      const tube = buildSegmentTube(segment, false);
+    // El tubo se atenua por BOTES DE PISO, no por contactos: hasta el
+    // primer bote va entero. Tras un skip, lo que sigue casi no se ve.
+    const floors = floorCountPerSegment(trajectory);
+    const skip = isSkip(trajectory);
+    splitByBounce(trajectory).forEach((segment, i) => {
+      const opacity = segmentOpacity(floors[i] ?? 0, skip && i >= 1);
+      const tube = buildSegmentTube(segment, false, opacity);
       if (tube) this.gPath.add(tube);
+    });
+
+    for (const contact of labelContacts(trajectory)) {
+      this.addContactMarker(contact);
     }
+  }
 
-    const dot = new THREE.SphereGeometry(0.055, 14, 10);
-    for (const bounce of trajectory.bounces) {
-      const marker = new THREE.Mesh(
-        dot.clone(),
-        new THREE.MeshBasicMaterial({ color: PALETTE.bounce }),
-      );
-      marker.position.set(bounce.point.x, bounce.point.y, bounce.point.z);
-      this.gMarkers.add(marker);
+  private addContactMarker(c: Contact): void {
+    const { x, y, z } = c.bounce.point;
 
-      const sprite = makeNumberSprite(bounce.index);
-      sprite.position.set(
-        bounce.point.x,
-        bounce.point.y + 0.3,
-        bounce.point.z,
+    if (c.kind === 'wall') {
+      const dot = new THREE.Mesh(
+        new THREE.SphereGeometry(0.04, 12, 8),
+        new THREE.MeshBasicMaterial({ color: 0x8ea5be }),
       );
+      dot.position.set(x, y, z);
+      this.gMarkers.add(dot);
+
+      const sprite = makeContactSprite(c.label, 'wall');
+      sprite.position.set(x, y + 0.22, z);
       this.gMarkers.add(sprite);
+      return;
     }
-    dot.dispose();
+
+    // Bote de piso: marca de impacto en el suelo y su numero encima.
+    const style: ContactStyle = c.skip ? 'skip' : 'floor';
+    const color = c.skip ? 0xef5f5f : 0xffc94d;
+    const impact = makeFloorImpact(
+      color,
+      c.skip ? 0.26 : c.primary ? 0.2 : 0.11,
+      c.primary || c.skip ? 0.95 : 0.5,
+    );
+    impact.position.set(x, 0.006, z);
+    this.gMarkers.add(impact);
+
+    // Del 4.º bote en adelante, solo la marca en el suelo: sus numeros se
+    // amontonan donde la pelota se muere y tapan lo que importa.
+    if (!c.primary && !c.skip) return;
+    const sprite = makeContactSprite(c.skip ? 'PISO' : c.label, style);
+    sprite.position.set(x, y + 0.36, z);
+    this.gMarkers.add(sprite);
   }
 
   setGhosts(list: readonly Trajectory[]): void {

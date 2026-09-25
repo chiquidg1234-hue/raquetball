@@ -7,6 +7,7 @@ import './style.css';
 
 import { cloneBoard } from './core/board.js';
 import { simulate } from './core/engine.js';
+import { isSkip } from './core/contacts.js';
 import { unfoldFirstSideBounce } from './core/unfold.js';
 import { BoardOverlay } from './render2d/overlay.js';
 import { canvasToPng, svgToPng } from './persist/exportPng.js';
@@ -60,6 +61,19 @@ let activePanel = 'shot';
 
 // ------------------------------------------------------------- vistas 2D
 
+/** Leyenda de la planta: bote de piso frente a rebote de pared. */
+const legend = (): HTMLElement =>
+  el('div', { class: 'viewport-legend', 'aria-hidden': 'true' }, [
+    el('span', { class: 'legend-item' }, [
+      el('span', { class: 'legend-floor', text: '1' }),
+      'bote de piso',
+    ]),
+    el('span', { class: 'legend-item' }, [
+      el('span', { class: 'legend-wall' }, [el('span', { text: 'F' })]),
+      'pared',
+    ]),
+  ]);
+
 const mount2D = (): void => {
   for (const projection of PROJECTIONS) {
     const host = mustGet(`viewport-${projection.id}`);
@@ -71,8 +85,20 @@ const mount2D = (): void => {
     host.appendChild(
       el('div', { class: 'viewport-hint', text: projection.hint }),
     );
+    if (projection.id === 'plan') host.appendChild(legend());
     views.set(projection.id, view);
   }
+
+  // Aviso de skip: tiene que verse encima de la cancha, no solo como una
+  // etiqueta en el panel lateral.
+  mustGet('viewports').appendChild(
+    el('div', { class: 'skip-banner', id: 'skip-banner', hidden: true, role: 'alert' }, [
+      el('strong', { text: 'SKIP' }),
+      el('span', {
+        text: 'La pelota toca el piso antes que la frontal. El punto se pierde.',
+      }),
+    ]),
+  );
 
   // Modo de input A. La lateral se deja de solo lectura: descarta X, asi
   // que un clic ahi no puede decidir donde esta parado el jugador.
@@ -520,10 +546,6 @@ const redraw = (changed?: ReadonlySet<string>): void => {
     boardOverlay.render();
   }
 
-  if (boardOverlay && (!changed || changed.has('board'))) {
-    boardOverlay.render();
-  }
-
   if (scene3d) {
     // Reconstruir el tubo cuesta; el playhead se mueve cada frame y no
     // necesita tocarlo.
@@ -535,6 +557,11 @@ const redraw = (changed?: ReadonlySet<string>): void => {
     if (!changed || changed.has('aim')) scene3d.trajectory.setAim(state.aim);
     scene3d.trajectory.setPlayhead(state.playhead);
     scene3d.invalidate();
+  }
+
+  if (trajectoryChanged) {
+    const banner = document.getElementById('skip-banner');
+    if (banner) banner.hidden = !isSkip(state.trajectory);
   }
 
   syncTimeline();

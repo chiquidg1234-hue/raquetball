@@ -7,6 +7,12 @@
  */
 
 import { COURT } from '../core/constants.js';
+import {
+  PRIMARY_FLOOR_BOUNCES,
+  labelContacts,
+  readableSequence,
+  type Contact,
+} from '../core/contacts.js';
 import { SURFACE_BY_ID } from '../core/court.js';
 import { DEEP_PROBE_Z, analyse } from '../core/rules.js';
 import { pathLength } from '../core/trajectory-utils.js';
@@ -41,20 +47,96 @@ const stat = (label: string, value: string, unit = ''): HTMLElement =>
     ]),
   ]);
 
+/** Etiqueta de un contacto: circulo dorado si es piso, rombo si es pared. */
+const contactChip = (c: Contact): HTMLElement => {
+  if (c.skip) return el('span', { class: 'chip chip--skip', text: '!' });
+  if (c.kind === 'floor') {
+    return el('span', {
+      class: c.primary ? 'chip chip--floor' : 'chip chip--floor chip--minor',
+      text: c.label,
+    });
+  }
+  return el('span', { class: 'chip chip--wall' }, [el('span', { text: c.label })]);
+};
+
+/** "a 1.1 m de la izquierda": como lo dice un jugador. */
+const lateral = (x: number): string =>
+  x <= COURT.width / 2
+    ? `a ${x.toFixed(1)} m de la izquierda`
+    : `a ${(COURT.width - x).toFixed(1)} m de la derecha`;
+
+const ORDINAL = ['1.er', '2.º', '3.er'];
+
 export const createInspectorPanel = (): PanelView => {
   const root = el('div', { class: 'panel-view' });
   const verdict = el('div', { class: 'verdict' });
+  const floorsHost = el('div', { class: 'floor-cards' });
   const stats = el('div', { class: 'stat-grid' });
   const tableHost = el('div', { class: 'table-host' });
 
   root.append(
     el('div', { class: 'section-title', text: 'Que tiro es' }),
     verdict,
+    el('div', { class: 'section-title', text: 'Botes de piso' }),
+    floorsHost,
     el('div', { class: 'section-title', text: 'Resumen' }),
     stats,
-    el('div', { class: 'section-title', text: 'Rebotes' }),
+    el('div', { class: 'section-title', text: 'Todos los contactos' }),
     tableHost,
   );
+
+  /**
+   * Los tres primeros botes de PISO, arriba del todo: son los que
+   * deciden el punto. Donde cae cada uno, cuando y a que velocidad llega.
+   */
+  const renderFloorCards = (trajectory: Trajectory): void => {
+    clearNode(floorsHost);
+    const floors = labelContacts(trajectory).filter((c) => c.kind === 'floor');
+
+    for (let k = 1; k <= PRIMARY_FLOOR_BOUNCES; k++) {
+      const c = floors[k - 1];
+      if (!c) {
+        floorsHost.append(
+          el('div', { class: 'floor-card floor-card--none' }, [
+            el('span', { class: 'chip chip--floor chip--minor', text: String(k) }),
+            el('span', {
+              class: 'floor-card-text',
+              text:
+                trajectory.model === 'geometric' && k > 1
+                  ? `sin ${ORDINAL[k - 1]} bote: el motor geometrico no tiene gravedad`
+                  : `no llega a dar un ${ORDINAL[k - 1]} bote`,
+            }),
+          ]),
+        );
+        continue;
+      }
+      const b = c.bounce;
+      const card = el(
+        'button',
+        {
+          class: c.skip ? 'floor-card floor-card--skip' : 'floor-card',
+          type: 'button',
+          'data-floor-card': k,
+          title: 'Ir a este bote en la linea de tiempo',
+        },
+        [
+          contactChip(c),
+          el('span', { class: 'floor-card-text' }, [
+            el('strong', {
+              text: c.skip
+                ? 'PISO antes que la frontal: skip'
+                : `a ${b.point.z.toFixed(1)} m de la frontal`,
+            }),
+            el('span', {
+              text: `${lateral(b.point.x)} · ${b.time.toFixed(2)} s · llega a ${b.incomingSpeed.toFixed(0)} m/s`,
+            }),
+          ]),
+        ],
+      );
+      card.addEventListener('click', () => update({ playhead: b.time, playing: false }));
+      floorsHost.append(card);
+    }
+  };
 
   const render = (trajectory: Trajectory): void => {
     // ---- FASE 8: juicio reglamentario y clasificacion ----
@@ -72,6 +154,13 @@ export const createInspectorPanel = (): PanelView => {
       badges.append(badge(a.serve.label, a.serve.legal ? 'ok' : 'bad'));
     }
     verdict.append(badges);
+    if (trajectory.bounces.length > 0) {
+      verdict.append(
+        el('div', { class: 'sequence', title: 'F frontal · I izquierda · D derecha · T trasera · C techo' }, [
+          readableSequence(trajectory, 7),
+        ]),
+      );
+    }
     verdict.append(el('div', { class: 'verdict-detail', text: a.classDetail }));
     if (!a.ret.legal) {
       verdict.append(el('div', { class: 'verdict-detail', text: a.ret.detail }));
@@ -80,9 +169,15 @@ export const createInspectorPanel = (): PanelView => {
       verdict.append(el('div', { class: 'verdict-detail', text: a.serve.detail }));
     }
 
+    renderFloorCards(trajectory);
+
     clearNode(stats);
     stats.append(
-      stat('Rebotes', String(trajectory.bounces.length)),
+      stat(
+        'Botes de piso',
+        String(trajectory.bounces.filter((b) => b.surface === 'floor').length),
+        `de ${trajectory.bounces.length} contactos`,
+      ),
       stat('Duracion', trajectory.totalTime.toFixed(2), 's'),
       stat('Recorrido', pathLength(trajectory).toFixed(1), 'm'),
       stat(
@@ -156,8 +251,8 @@ export const createInspectorPanel = (): PanelView => {
 
     const table = el('table', { class: 'inspector-table' });
     const head = el('tr', {}, [
-      el('th', { text: '#' }),
-      el('th', { text: 'pared' }),
+      el('th', { text: '' }),
+      el('th', { text: 'donde' }),
       el('th', { text: 't (s)' }),
       el('th', { text: 'alto' }),
       el('th', { text: 'v' }),
@@ -166,15 +261,23 @@ export const createInspectorPanel = (): PanelView => {
     table.append(el('thead', {}, [head]));
 
     const body = el('tbody');
-    for (const b of trajectory.bounces) {
-      const row = el('tr', { 'data-bounce': b.index }, [
-        el('td', { class: 'col-num', text: String(b.index) }),
-        el('td', { text: SURFACE_BY_ID[b.surface].label }),
-        el('td', { text: b.time.toFixed(3) }),
-        el('td', { text: `${b.point.y.toFixed(2)} m` }),
-        el('td', { text: b.outgoingSpeed.toFixed(0) }),
-        el('td', { text: `${b.incidenceAngleDeg.toFixed(0)}°` }),
-      ]);
+    for (const c of labelContacts(trajectory)) {
+      const b = c.bounce;
+      const row = el(
+        'tr',
+        {
+          'data-bounce': b.index,
+          class: c.kind === 'floor' ? 'row-floor' : 'row-wall',
+        },
+        [
+          el('td', {}, [contactChip(c)]),
+          el('td', { text: c.kind === 'floor' ? 'piso' : SURFACE_BY_ID[b.surface].label }),
+          el('td', { text: b.time.toFixed(3) }),
+          el('td', { text: `${b.point.y.toFixed(2)} m` }),
+          el('td', { text: b.outgoingSpeed.toFixed(0) }),
+          el('td', { text: `${b.incidenceAngleDeg.toFixed(0)}°` }),
+        ],
+      );
       row.title = `x ${b.point.x.toFixed(2)}  y ${b.point.y.toFixed(2)}  z ${b.point.z.toFixed(2)}`;
       row.addEventListener('click', () =>
         update({ playhead: b.time, playing: false }),

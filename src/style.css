@@ -28,6 +28,12 @@
   --traj-hot: #ff8a4c;
   --traj-cold: #4cc2ff;
 
+  /* Botes de piso frente a rebotes de pared: dos familias que no se
+     pueden confundir. El piso es lo que decide el punto: va en dorado. */
+  --floor-bounce: #ffc94d;
+  --floor-bounce-ink: #1c1405;
+  --wall-mark: #8ea5be;
+
   --radius: 10px;
   --radius-sm: 6px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
@@ -37,6 +43,17 @@
 
 * {
   box-sizing: border-box;
+}
+
+/*
+ * El atributo `hidden` tiene que ganar SIEMPRE. La regla del navegador
+ * para [hidden] tiene la especificidad minima, asi que cualquier clase con
+ * `display: flex` la pisa. Sin esto, al cerrar un modal su fondo oscuro se
+ * quedaba encima de toda la app, invisible a medias y tragandose los
+ * clics: tras exportar un PNG una vez, la app dejaba de responder.
+ */
+[hidden] {
+  display: none !important;
 }
 
 html,
@@ -289,6 +306,83 @@ button {
   opacity: 1;
 }
 
+.viewports {
+  position: relative;
+}
+
+.viewport-legend {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 2;
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(9, 13, 19, 0.82);
+  border: 1px solid var(--border-soft);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  pointer-events: none;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.legend-floor,
+.legend-wall {
+  display: inline-grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 9px;
+}
+.legend-floor {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: var(--floor-bounce);
+  color: var(--floor-bounce-ink);
+}
+.legend-wall {
+  width: 11px;
+  height: 11px;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--wall-mark);
+  color: var(--wall-mark);
+}
+.legend-wall > span {
+  transform: rotate(-45deg);
+}
+
+.skip-banner {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: calc(100% - 24px);
+  padding: 7px 13px;
+  border-radius: var(--radius);
+  background: rgba(40, 10, 12, 0.94);
+  border: 1px solid var(--danger);
+  color: #ffd9d9;
+  font-size: 12.5px;
+  line-height: 1.35;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.skip-banner strong {
+  color: var(--danger);
+  letter-spacing: 0.04em;
+}
+
 #canvas3d {
   width: 100%;
   height: 100%;
@@ -418,17 +512,86 @@ button {
   stroke-width: 0.05;
 }
 
-.bounce-dot {
+/* --- rebote de PARED: rombo pequeno con la inicial, sin numero --- */
+.wall-mark {
   fill: var(--bg-sunken);
-  stroke: var(--traj);
-  stroke-width: 0.045;
+  stroke: var(--wall-mark);
+  stroke-width: 0.035;
 }
-.bounce-num {
-  fill: var(--text);
+.wall-code {
+  fill: var(--wall-mark);
   text-anchor: middle;
   dominant-baseline: central;
   font-family: var(--mono);
-  font-weight: 600;
+  font-weight: 700;
+}
+
+/* --- bote de PISO: circulo dorado numerado aparte --- */
+.floor-dot {
+  fill: var(--floor-bounce);
+  stroke: var(--bg-sunken);
+  stroke-width: 0.045;
+}
+.floor-dot--minor {
+  opacity: 0.55;
+}
+.floor-num {
+  fill: var(--floor-bounce-ink);
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-family: var(--mono);
+  font-weight: 800;
+  pointer-events: none;
+}
+.floor-num--minor {
+  opacity: 0.8;
+}
+.floor-grab {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 0.04;
+  cursor: grab;
+}
+.contact--floor:hover .floor-grab {
+  stroke: var(--floor-bounce);
+  stroke-dasharray: 0.12 0.1;
+}
+.contact--floor.is-dragging .floor-grab {
+  cursor: grabbing;
+  stroke: var(--floor-bounce);
+}
+
+/* --- skip: el piso antes que la frontal --- */
+.skip-halo {
+  fill: rgba(239, 95, 95, 0.16);
+  stroke: var(--danger);
+  stroke-width: 0.03;
+  stroke-dasharray: 0.1 0.08;
+}
+.skip-dot {
+  fill: var(--danger);
+}
+.skip-mark {
+  fill: #fff;
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-family: var(--font);
+  font-weight: 800;
+}
+.skip-label {
+  fill: var(--danger);
+  text-anchor: middle;
+  dominant-baseline: central;
+  font-family: var(--font);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  paint-order: stroke;
+  stroke: var(--court-fill);
+  stroke-width: 0.09;
+  stroke-linejoin: round;
+}
+.traj-line--void {
+  stroke-dasharray: 0.14 0.16;
 }
 
 .exit-tail {
@@ -750,9 +913,8 @@ input[type='range']::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.025);
   cursor: pointer;
 }
-.inspector-table .col-num {
-  color: var(--accent);
-  font-weight: 600;
+.inspector-table td:first-child {
+  width: 26px;
 }
 
 .stat-grid {
@@ -817,6 +979,102 @@ input[type='range']::-moz-range-thumb {
   font-size: 11.5px;
   line-height: 1.5;
   color: var(--text-dim);
+}
+
+.sequence {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
+}
+
+.chip {
+  display: inline-grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 10.5px;
+  flex: 0 0 auto;
+}
+.chip--floor,
+.chip--skip {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--floor-bounce);
+  color: var(--floor-bounce-ink);
+}
+.chip--skip {
+  background: var(--danger);
+  color: #fff;
+}
+.chip--minor {
+  opacity: 0.55;
+}
+.chip--wall {
+  width: 13px;
+  height: 13px;
+  margin: 3px;
+  transform: rotate(45deg);
+  border: 1.5px solid var(--wall-mark);
+  color: var(--wall-mark);
+  font-size: 8.5px;
+}
+.chip--wall > span {
+  transform: rotate(-45deg);
+}
+
+.floor-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.floor-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  border: 1px solid var(--border-soft);
+  color: var(--text-dim);
+}
+button.floor-card:hover {
+  border-color: rgba(255, 201, 77, 0.5);
+}
+.floor-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  min-width: 0;
+}
+.floor-card-text strong {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.floor-card--none {
+  opacity: 0.7;
+}
+.floor-card--none .floor-card-text {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.floor-card--skip {
+  border-color: rgba(239, 95, 95, 0.55);
+  background: rgba(239, 95, 95, 0.08);
+}
+.floor-card--skip .floor-card-text strong {
+  color: var(--danger);
+}
+.inspector-table .row-wall td {
+  color: var(--text-faint);
 }
 
 /* ------------------------------------------------------------- timeline */

@@ -6,6 +6,13 @@
  */
 
 import { BALL, COURT, SERVICE_ZONE } from '../core/constants.js';
+import {
+  floorCountPerSegment,
+  isSkip,
+  labelContacts,
+  segmentOpacity,
+  type Contact,
+} from '../core/contacts.js';
 import type { Trajectory, Vec3 } from '../core/types.js';
 import type { UnfoldedCourt } from '../core/unfold.js';
 import { positionAt, splitByBounce } from '../core/trajectory-utils.js';
@@ -318,8 +325,11 @@ export class CourtView2D {
   }
 
   /**
-   * La trayectoria, partida por rebotes: el tramo 1 opaco, los siguientes
-   * cada vez mas desvaidos. Asi se lee el orden de los rebotes sin animar.
+   * La trayectoria, partida por contactos, pero atenuada por BOTES DE
+   * PISO: hasta el primer bote va entera, y se apaga un poco en cada bote.
+   * Antes se atenuaba en cada contacto, paredes incluidas, y un Z serve se
+   * desvanecia antes de haber botado siquiera. Tras un skip, lo que sigue
+   * ya no cuenta y se dibuja casi apagado y punteado.
    */
   private drawPath(
     trajectory: Trajectory,
@@ -327,44 +337,138 @@ export class CourtView2D {
     ghost: boolean,
   ): void {
     const segments = splitByBounce(trajectory);
+    const floors = floorCountPerSegment(trajectory);
+    const skip = isSkip(trajectory);
     segments.forEach((seg, i) => {
       if (seg.length < 2) return;
-      const opacity = ghost
-        ? 0.18
-        : Math.max(0.2, 1 - i * 0.18);
+      const afterSkip = skip && i >= 1;
+      const opacity = ghost ? 0.18 : segmentOpacity(floors[i] ?? 0, afterSkip);
+      const cls = ghost
+        ? 'traj-line traj-line--ghost'
+        : afterSkip
+          ? 'traj-line traj-line--void'
+          : 'traj-line';
       svgEl(
         'polyline',
         {
-          class: ghost ? 'traj-line traj-line--ghost' : 'traj-line',
+          class: cls,
           points: pointsAttr(seg.map((s) => this.p(s.p))),
           opacity,
           'data-segment': i,
+          'data-floors': floors[i] ?? 0,
         },
         parent,
       );
     });
   }
 
+  /**
+   * Dos familias de marcadores que se distinguen de un vistazo:
+   *
+   *   bote de PISO     circulo dorado, numerado aparte: 1, 2, 3...
+   *   rebote de PARED  rombo pequeno con la inicial: F, I, D, T, C
+   *
+   * Los tres primeros botes de piso van grandes; del 4.º en adelante,
+   * pequenos y apagados. El piso se dibuja encima de las paredes: es lo
+   * que decide el punto.
+   */
   private drawBounceMarkers(trajectory: Trajectory): void {
-    trajectory.bounces.forEach((b) => {
-      const pt = this.p(b.point);
+    const contacts = labelContacts(trajectory);
+    for (const c of contacts) if (c.kind === 'wall') this.drawWallMark(c);
+    for (const c of contacts) if (c.kind === 'floor') this.drawFloorMark(c);
+  }
+
+  private drawWallMark(c: Contact): void {
+    const pt = this.p(c.bounce.point);
+    const g = svgEl(
+      'g',
+      {
+        class: `contact contact--wall bounce--${c.bounce.surface}`,
+        'data-bounce': c.bounce.index,
+        'data-wall': c.wallCode ?? undefined,
+      },
+      this.gMarkers,
+    );
+    const h = 0.17;
+    svgEl(
+      'polygon',
+      {
+        class: 'wall-mark',
+        points: `${pt.u},${pt.v - h} ${pt.u + h},${pt.v} ${pt.u},${pt.v + h} ${pt.u - h},${pt.v}`,
+      },
+      g,
+    );
+    svgEl(
+      'text',
+      { class: 'wall-code', x: pt.u, y: pt.v, 'font-size': 0.17 },
+      g,
+    ).textContent = c.label;
+  }
+
+  private drawFloorMark(c: Contact): void {
+    const pt = this.p(c.bounce.point);
+
+    if (c.skip) {
+      // El piso antes que la frontal: la jugada termina aqui.
       const g = svgEl(
         'g',
-        { class: `bounce bounce--${b.surface}`, 'data-bounce': b.index },
+        { class: 'contact contact--skip', 'data-bounce': c.bounce.index },
         this.gMarkers,
       );
-      svgEl('circle', { class: 'bounce-dot', cx: pt.u, cy: pt.v, r: 0.2 }, g);
+      svgEl('circle', { class: 'skip-halo', cx: pt.u, cy: pt.v, r: 0.46 }, g);
+      svgEl('circle', { class: 'skip-dot', cx: pt.u, cy: pt.v, r: 0.27 }, g);
       svgEl(
         'text',
-        {
-          class: 'bounce-num',
-          x: pt.u,
-          y: pt.v,
-          'font-size': 0.26,
-        },
+        { class: 'skip-mark', x: pt.u, y: pt.v, 'font-size': 0.3 },
         g,
-      ).textContent = String(b.index);
-    });
+      ).textContent = '!';
+      svgEl(
+        'text',
+        { class: 'skip-label', x: pt.u, y: pt.v + 0.66, 'font-size': 0.3 },
+        g,
+      ).textContent = 'PISO';
+      return;
+    }
+
+    const major = c.primary;
+    const g = svgEl(
+      'g',
+      {
+        class: `contact contact--floor ${major ? 'contact--primary' : 'contact--minor'}`,
+        'data-bounce': c.bounce.index,
+        'data-floor-bounce': c.floorIndex ?? undefined,
+      },
+      this.gMarkers,
+    );
+    if (major && this.projection.id === 'plan') {
+      // Anillo de agarre: los botes 1, 2 y 3 se arrastran en la planta.
+      svgEl(
+        'circle',
+        { class: 'floor-grab', cx: pt.u, cy: pt.v, r: 0.42 },
+        g,
+      );
+    }
+    svgEl(
+      'circle',
+      {
+        class: major ? 'floor-dot' : 'floor-dot floor-dot--minor',
+        cx: pt.u,
+        cy: pt.v,
+        r: major ? 0.25 : 0.09,
+      },
+      g,
+    );
+    // Del 4.º bote en adelante no se escribe el numero: amontonados en la
+    // zona donde la pelota se muere solo ensucian. Queda como tooltip.
+    if (major) {
+      svgEl(
+        'text',
+        { class: 'floor-num', x: pt.u, y: pt.v, 'font-size': 0.29 },
+        g,
+      ).textContent = c.label;
+    } else {
+      svgEl('title', {}, g).textContent = `bote ${c.label}`;
+    }
   }
 
   /**
