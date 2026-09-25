@@ -24,20 +24,46 @@
  * unas pocas.
  */
 
+import { readableSequence } from './contacts.js';
 import { CENTER_BOX } from './court.js';
+import { CLASS_LABEL, classify } from './rules.js';
 import { simulate } from './engine.js';
 import type { PhysicsModel, Shot, Trajectory, Vec3 } from './types.js';
 import { fromAzimuthElevation, normalize, sub } from './vec3.js';
+
+/** Que bote de PISO se quiere colocar. Solo los tres primeros importan. */
+export type BounceIndex = 1 | 2 | 3;
 
 export interface AimTarget {
   /** Donde debe caer la pelota, en el piso. */
   x: number;
   z: number;
-  /** Que bote en el piso debe caer ahi. 1 = el primero. */
-  bounceIndex: 1 | 2;
+  /** Que bote de PISO debe caer ahi (no que contacto). 1 = el primero. */
+  bounceIndex: BounceIndex;
 }
 
 export interface SolveOptions {
+  /**
+   * Angulos desde los que empezar a buscar, antes que la semilla del
+   * espejo. Al arrastrar un bote se pasa el tiro ACTUAL: casi siempre hay
+   * varios tiros que dejan el bote en el mismo sitio, y el natural es el
+   * mas parecido al que ya se tenia. Sin esto, arrastrar el 2.º bote de un
+   * pase podia devolver un kill que llega rebotando de la trasera: legal,
+   * pero de otra familia de tiros.
+   */
+  seed?: [number, number];
+  /**
+   * Donde caian los botes de piso ANTERIORES al que se arrastra (el 1.º si
+   * se arrastra el 2.º; el 1.º y el 2.º si se arrastra el 3.º). De todas
+   * las soluciones posibles gana la que menos los mueve: se mueve lo que
+   * se agarra y nada mas. Comparar angulos no basta: para dejar el 2.º
+   * bote en el rincon derecho hay un kill y un pase cruzado con angulos
+   * parecidos, pero el kill arrastra el 1.er bote ocho metros hacia la
+   * frontal y el pase lo deja cerca de donde estaba.
+   */
+  keepBounces?: { x: number; z: number }[];
+  /** Primera superficie que tocaba el tiro de partida: se intenta conservar. */
+  firstSurface?: import('./types.js').SurfaceId;
   origin: Vec3;
   speed: number;
   model: PhysicsModel;
@@ -63,6 +89,26 @@ export interface SolveResult {
   aimPoint: Vec3 | null;
   trajectory: Trajectory | null;
   note: string;
+  /**
+   * Otras FORMAS de dejar el bote en el mismo sitio, una por familia de
+   * tiro (secuencia de contactos distinta). Casi siempre hay varias: un
+   * kill, un pase cruzado, un ceiling... Es lo que diria un entrenador, y
+   * se ensena en vez de esconderlo.
+   */
+  alternatives?: Alternative[];
+  /** Secuencia de contactos hasta el bote pedido, "F → D → bote 1 → bote 2". */
+  family?: string;
+  /** Tipo de tiro: "passing shot", "kill shot"... */
+  kindLabel?: string;
+}
+
+export interface Alternative {
+  azimuthDeg: number;
+  elevationDeg: number;
+  speed: number;
+  error: number;
+  family: string;
+  kindLabel: string;
 }
 
 const DEG = 180 / Math.PI;
@@ -113,19 +159,31 @@ export const frontWallAimPoint = (origin: Vec3, mirrored: Vec3): Vec3 | null => 
 
 // ------------------------------------------------------------ evaluacion
 
+/**
+ * Simulacion para el solver. Para en cuanto la pelota da el bote de piso
+ * pedido: lo que pase despues no cambia la respuesta y costaria el doble.
+ * Paso de fisica identico al de la vista, asi que el bote cae exactamente
+ * en el mismo sitio que despues se dibuja.
+ */
 const runShot = (
   origin: Vec3,
   azimuthDeg: number,
   elevationDeg: number,
   speed: number,
   model: PhysicsModel,
+  bounceIndex: BounceIndex,
 ): Trajectory => {
   const shot: Shot = {
     origin,
     direction: fromAzimuthElevation(azimuthDeg, elevationDeg),
     speed,
   };
-  return simulate(shot, { model, maxBounces: 8 });
+  return simulate(shot, {
+    model,
+    maxBounces: 12,
+    stopAfterFloorBounces: bounceIndex,
+    sampleDt: 1 / 60,
+  });
 };
 
 interface Evaluation {
@@ -149,11 +207,20 @@ const evaluate = (
     elevationDeg,
     speed,
     opts.model,
+    target.bounceIndex,
   );
   const floors = trajectory.bounces.filter((b) => b.surface === 'floor');
   const wanted = floors[target.bounceIndex - 1];
 
-  if (wanted) {
+  // Solo valen tiros LEGALES: la pelota tiene que tocar la frontal antes
+  // que el piso. Sin esta condicion el solver "resolvia" objetivos
+  // imposibles tirando al suelo: un skip bota donde uno quiera, pero el
+  // punto ya esta perdido y su 2.º bote no significa nada.
+  const frontAt = trajectory.bounces.findIndex((b) => b.surface === 'front');
+  const floorAt = trajectory.bounces.findIndex((b) => b.surface === 'floor');
+  const legal = frontAt !== -1 && (floorAt === -1 || frontAt < floorAt);
+
+  if (wanted && legal) {
     const dx = wanted.point.x - target.x;
     const dz = wanted.point.z - target.z;
     return {
@@ -163,10 +230,11 @@ const evaluate = (
     };
   }
 
-  // No hay bote donde se pedia. El coste tiene que seguir guiando la
+  // No hay bote legal donde se pedia. El coste tiene que seguir guiando la
   // busqueda, asi que se mide lo mas cerca que pasa la trayectoria del
   // objetivo, con una penalizacion que la mantenga siempre peor que
-  // cualquier solucion valida.
+  // cualquier solucion valida. Un skip se penaliza aun mas: esta
+  // "cerca" en el espacio de angulos pero es la peor respuesta posible.
   let closest = Infinity;
   for (const s of trajectory.samples) {
     const d = Math.hypot(s.p.x - target.x, s.p.z - target.z);
@@ -175,7 +243,7 @@ const evaluate = (
   return {
     trajectory,
     residual: null,
-    cost: 50 + (Number.isFinite(closest) ? closest : 50),
+    cost: (legal ? 50 : 80) + (Number.isFinite(closest) ? closest : 50),
   };
 };
 
@@ -321,6 +389,53 @@ const newton = (
   return { point: best, value: bestCost, iterations };
 };
 
+// ------------------------------------------------------ barrido de semillas
+
+/**
+ * Semillas por barrido grueso de todo el abanico frontal.
+ *
+ * La semilla del espejo es excelente para el PRIMER bote, pero para el
+ * segundo o el tercero apunta al sitio equivocado: coloca el primer bote
+ * en el objetivo, con lo que los siguientes caen mas atras. Y los tiros
+ * que pasan por una lateral (Z, around-the-world) viven en otra region
+ * del espacio de angulos. Un barrido grueso de 10° encuentra la cuenca
+ * correcta; Newton y Nelder-Mead afinan desde ahi.
+ */
+const scanSeeds = (
+  cost: (az: number, el: number) => number,
+  count: number,
+): [number, number][] => {
+  const cells: { p: [number, number]; v: number }[] = [];
+  for (let az = -80; az <= 80; az += 10) {
+    for (let el = -20; el <= 60; el += 10) {
+      cells.push({ p: [az, el], v: cost(az, el) });
+    }
+  }
+  cells.sort((a, b) => a.v - b.v);
+
+  const picked: [number, number][] = [];
+  for (const c of cells) {
+    if (picked.length >= count) break;
+    const far = picked.every(
+      (q) => Math.abs(q[0] - c.p[0]) >= 15 || Math.abs(q[1] - c.p[1]) >= 15,
+    );
+    if (far) picked.push(c.p);
+  }
+  return picked;
+};
+
+/** Velocidades a probar si se deja buscar la fuerza: la actual primero. */
+const speedCandidates = (current: number, search: boolean): number[] => {
+  if (!search) return [current];
+  const raw = [current, current * 0.8, current * 1.25, current * 0.6, current * 1.55, 30, 50, 70];
+  const out: number[] = [];
+  for (const v of raw) {
+    const clamped = Math.min(Math.max(v, 10), 90);
+    if (out.every((u) => Math.abs(u - clamped) > 3)) out.push(clamped);
+  }
+  return out;
+};
+
 // -------------------------------------------------------------- resolver
 
 export const solveAim = (
@@ -342,7 +457,10 @@ export const solveAim = (
     note: string,
   ): SolveResult => {
     const ev = evaluate(opts, target, az, el, speed);
-    const mirrored = mirrorSolution(opts.origin, target).mirrored;
+    // El punto de mira que se ensena es donde la pelota de verdad pega en
+    // la frontal. La recta del espejo solo coincide con eso en el motor
+    // geometrico: con gravedad el tiro se curva y pega mas abajo.
+    const front = ev.trajectory.bounces.find((b) => b.surface === 'front');
     return {
       ok: ev.cost <= tolerance,
       azimuthDeg: az,
@@ -351,7 +469,9 @@ export const solveAim = (
       error: ev.cost,
       iterations,
       method,
-      aimPoint: frontWallAimPoint(opts.origin, mirrored),
+      aimPoint: front
+        ? front.point
+        : frontWallAimPoint(opts.origin, seed.mirrored),
       trajectory: ev.trajectory,
       note,
     };
@@ -371,62 +491,162 @@ export const solveAim = (
     // Si el camino recto choca antes con una lateral, hay que iterar.
   }
 
-  const speeds = opts.searchSpeed
-    ? [opts.speed, opts.speed * 0.75, opts.speed * 1.25, 30, 45, 60, 75]
-    : [opts.speed];
+  let best: SolveResult | null = null;
+  const consider = (r: SolveResult): boolean => {
+    if (!best || r.error < best.error) best = r;
+    return r.ok;
+  };
 
-  let bestResult: SolveResult | null = null;
+  /**
+   * Cuanto se aleja una solucion de lo que se tenia. Tres terminos:
+   *   - cuanto se mueven los botes de piso ANTERIORES al que se arrastra
+   *     (se mueve lo que se agarra y nada mas);
+   *   - cambiar la primera superficie que toca la pelota cuesta como si un
+   *     bote se moviera 6 m: si el tiro abria por la frontal, que siga
+   *     abriendo por la frontal y no se convierta en uno que abre por la
+   *     lateral;
+   *   - un pequeno termino de angulos para desempatar, con la elevacion
+   *     pesando el triple: es la que decide si es un kill, un pase o un globo.
+   * Heuristico a proposito, y por eso las demas soluciones se ofrecen como
+   * alternativas en vez de descartarse.
+   */
+  const keep = opts.keepBounces ?? [];
+  const reference = opts.seed ?? seedAngles;
+  const firstSurface = opts.firstSurface;
+  const distance = (r: SolveResult): number => {
+    const angles = Math.hypot(r.azimuthDeg - reference[0], 3 * (r.elevationDeg - reference[1]));
+    if (!r.trajectory) return angles;
+    const floors = r.trajectory.bounces.filter((b) => b.surface === 'floor');
+    const moved = keep.reduce((sum, k, i) => {
+      const b = floors[i];
+      return sum + (b ? Math.hypot(b.point.x - k.x, b.point.z - k.z) : 30);
+    }, 0);
+    const first = r.trajectory.bounces[0]?.surface;
+    const changedFamily = firstSurface && first && first !== firstSurface ? 6 : 0;
+    return moved + changedFamily + 0.02 * angles;
+  };
+  const wantsRanking = !!opts.seed || keep.length > 0;
 
-  for (const speed of speeds) {
-    const n = newton(opts, target, seedAngles, speed, maxIterations, tolerance);
-    let candidate = finish(
-      n.point[0],
-      n.point[1],
-      speed,
-      'newton',
-      n.iterations,
-      'Metodo de disparo: Newton de dos variables partiendo de la solucion geometrica.',
-    );
+  for (const speed of speedCandidates(opts.speed, !!opts.searchSpeed)) {
+    const cost = (a: number, e: number) => evaluate(opts, target, a, e, speed).cost;
+    const solutions: SolveResult[] = [];
+    let iterations = 0;
+    let bestLocal: { point: [number, number]; value: number } | null = null;
 
-    if (!candidate.ok) {
-      const nm = nelderMead(
-        (a, e) => evaluate(opts, target, a, e, speed).cost,
-        n.value < 50 ? n.point : seedAngles,
-        maxIterations * 4,
-        tolerance,
-      );
-      const fallback = finish(
-        nm.point[0],
-        nm.point[1],
-        speed,
-        'nelder-mead',
-        n.iterations + nm.iterations,
-        'Newton no converge aqui, asi que remata Nelder-Mead.',
-      );
-      if (fallback.error < candidate.error) candidate = fallback;
+    const tryFrom = (from: [number, number], note: string): SolveResult => {
+      const n = newton(opts, target, from, speed, maxIterations, tolerance);
+      iterations += n.iterations;
+      if (!bestLocal || n.value < bestLocal.value) bestLocal = { point: n.point, value: n.value };
+      const r = finish(n.point[0], n.point[1], speed, 'newton', iterations, note);
+      consider(r);
+      if (r.ok) solutions.push(r);
+      return r;
+    };
+
+    // 0. Desde el tiro que ya se tenia: para un arrastre corto suele ser
+    //    ya la mejor respuesta, y compite con las demas en igualdad.
+    if (opts.seed) {
+      tryFrom(opts.seed, 'Metodo de disparo: Newton partiendo del tiro que ya tenias.');
     }
 
-    if (!bestResult || candidate.error < bestResult.error) {
-      bestResult = candidate;
+    // 1. Desde la semilla del espejo. Sin nada que conservar, si converge
+    //    es la respuesta: para el 1.er bote es el camino directo.
+    const fast = tryFrom(seedAngles,
+      'Metodo de disparo: Newton de dos variables partiendo de la solucion geometrica.');
+    if (fast.ok && !wantsRanking) break;
+
+    // 2. Barrido: reunir TODAS las soluciones que salgan y quedarse con la
+    //    mas parecida. Casi siempre hay varias familias (kill, pase,
+    //    ceiling, tiros que abren por la lateral) y parar en la primera
+    //    daba respuestas de otra familia de tiros.
+    for (const seedCell of scanSeeds(cost, 8)) {
+      tryFrom(seedCell, 'Metodo de disparo: barrido de semillas y Newton; de todas las soluciones, la que menos cambia tu tiro.');
     }
-    if (bestResult.ok) break;
+    if (solutions.length > 0) {
+      solutions.sort((a, b) => distance(a) - distance(b));
+      best = solutions[0]!;
+      best.alternatives = distinctFamilies(opts, target, solutions);
+      break;
+    }
+
+    // 3. Remate con Nelder-Mead desde lo mejor que se tenga.
+    const from = (bestLocal as { point: [number, number] } | null)?.point ?? seedAngles;
+    const nm = nelderMead(cost, from, maxIterations * 4, tolerance);
+    if (
+      consider(
+        finish(nm.point[0], nm.point[1], speed, 'nelder-mead', iterations + nm.iterations,
+          'Newton no converge aqui, asi que remata Nelder-Mead.'),
+      )
+    ) break;
   }
 
-  if (!bestResult) {
-    return finish(
-      seed.azimuthDeg,
-      seed.elevationDeg,
-      opts.speed,
-      'ninguno',
-      0,
-      'No se ha podido resolver.',
-    );
-  }
+  const result: SolveResult =
+    best ??
+    finish(seed.azimuthDeg, seed.elevationDeg, opts.speed, 'ninguno', 0, 'No se ha podido resolver.');
 
-  if (!bestResult.ok) {
-    bestResult.note = `No hay tiro que caiga exactamente ahi con estos datos. Lo mas cerca que se llega es ${bestResult.error.toFixed(2)} m.`;
+  if (!result.ok) {
+    result.note = `No hay tiro que caiga exactamente ahi con estos datos. Lo mas cerca que se llega es ${result.error.toFixed(2)} m.`;
+  } else {
+    const described = describe(opts, target, result.azimuthDeg, result.elevationDeg, result.speed);
+    result.family = described.family;
+    result.kindLabel = described.kindLabel;
   }
-  return bestResult;
+  return result;
+};
+
+/** Familia (secuencia de contactos) y tipo de tiro de una solucion. */
+const describe = (
+  opts: SolveOptions,
+  target: AimTarget,
+  azimuthDeg: number,
+  elevationDeg: number,
+  speed: number,
+): { family: string; kindLabel: string } => {
+  const shot: Shot = {
+    origin: opts.origin,
+    direction: fromAzimuthElevation(azimuthDeg, elevationDeg),
+    speed,
+  };
+  // Para clasificar hace falta el tiro entero, no el recortado del solver.
+  const full = simulate(shot, { model: opts.model });
+  const upToTarget = simulate(shot, {
+    model: opts.model,
+    maxBounces: 12,
+    stopAfterFloorBounces: target.bounceIndex,
+    sampleDt: 1 / 30,
+  });
+  return {
+    family: readableSequence(upToTarget, 12),
+    kindLabel: CLASS_LABEL[classify(full, opts.origin).classification],
+  };
+};
+
+/**
+ * Una solucion por TIPO de tiro (pase, kill, pinch, ceiling...), la mejor
+ * de cada tipo, y como mucho cuatro. Por secuencia de contactos salian
+ * nueve opciones con tipos repetidos, y una lista asi no se lee.
+ */
+const MAX_ALTERNATIVES = 4;
+const distinctFamilies = (
+  opts: SolveOptions,
+  target: AimTarget,
+  solutions: SolveResult[],
+): Alternative[] => {
+  const byFamily = new Map<string, Alternative>();
+  for (const r of solutions) {
+    if (byFamily.size >= MAX_ALTERNATIVES) break;
+    const d = describe(opts, target, r.azimuthDeg, r.elevationDeg, r.speed);
+    if (byFamily.has(d.kindLabel)) continue;
+    byFamily.set(d.kindLabel, {
+      azimuthDeg: r.azimuthDeg,
+      elevationDeg: r.elevationDeg,
+      speed: r.speed,
+      error: r.error,
+      family: d.family,
+      kindLabel: d.kindLabel,
+    });
+  }
+  return [...byFamily.values()];
 };
 
 /** Objetivos con nombre, los que un entrenador pide de verdad. */
@@ -435,7 +655,7 @@ export const NAMED_TARGETS: {
   label: string;
   x: number;
   z: number;
-  bounceIndex: 1 | 2;
+  bounceIndex: BounceIndex;
 }[] = [
   { id: 'rear-left', label: 'Rincon trasero izquierdo', x: 0.6, z: 11.3, bounceIndex: 1 },
   { id: 'rear-right', label: 'Rincon trasero derecho', x: 5.5, z: 11.3, bounceIndex: 1 },

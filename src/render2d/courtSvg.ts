@@ -14,6 +14,7 @@ import {
   type Contact,
 } from '../core/contacts.js';
 import type { Trajectory, Vec3 } from '../core/types.js';
+import type { BounceIndex } from '../core/solve.js';
 import type { UnfoldedCourt } from '../core/unfold.js';
 import { positionAt, splitByBounce } from '../core/trajectory-utils.js';
 import { length, normalize } from '../core/vec3.js';
@@ -38,7 +39,7 @@ export interface TrajectoryDrawOptions {
   /** Trayectorias secundarias, mas apagadas (jugadas encadenadas). */
   ghosts?: Trajectory[];
   /** Objetivo del problema inverso (fase 10). Solo se dibuja en planta. */
-  target?: { x: number; z: number; bounceIndex: 1 | 2 } | null;
+  target?: { x: number; z: number; bounceIndex: BounceIndex } | null;
 }
 
 export class CourtView2D {
@@ -507,7 +508,7 @@ export class CourtView2D {
     ).textContent = 'fuera';
   }
 
-  private drawTarget(t: { x: number; z: number; bounceIndex: 1 | 2 }): void {
+  private drawTarget(t: { x: number; z: number; bounceIndex: BounceIndex }): void {
     const pt = this.p({ x: t.x, y: 0, z: t.z });
     const g = svgEl('g', { class: 'target-marker' }, this.gMarkers);
     svgEl('circle', { class: 'target-ring', cx: pt.u, cy: pt.v, r: 0.42 }, g);
@@ -522,8 +523,7 @@ export class CourtView2D {
         'font-size': 0.26,
       },
       g,
-    ).textContent =
-      t.bounceIndex === 1 ? '1er bote en el piso' : '2o bote en el piso';
+    ).textContent = `${['1.er', '2.º', '3.er'][t.bounceIndex - 1]} bote aqui`;
   }
 
   private drawOrigin(origin: Vec3): void {

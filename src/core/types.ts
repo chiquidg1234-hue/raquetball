@@ -84,4 +84,11 @@ export interface SimOptions {
   disableDrag?: boolean;
   /** Desactivar la gravedad (solo para tests). */
   disableGravity?: boolean;
+  /**
+   * Parar en cuanto la pelota haya dado este numero de botes de PISO. La
+   * usa el solver: para saber donde cae el 2.º bote no hace falta simular
+   * lo que pasa despues. Termina como 'maxBounces', que es lo que es: un
+   * limite de botes.
+   */
+  stopAfterFloorBounces?: number;
 }

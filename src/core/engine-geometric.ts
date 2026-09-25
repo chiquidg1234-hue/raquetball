@@ -34,6 +34,8 @@ export const simulateGeometric = (
   let p = clampToCourt(shot.origin);
   let d = normalize(shot.direction);
   let t = 0;
+  let floorBounces = 0;
+  const stopAfterFloor = opts.stopAfterFloorBounces ?? Infinity;
 
   builder.pushExact(t, p, scale(d, speed));
 
@@ -103,7 +105,8 @@ export const simulateGeometric = (
     d = dOut;
     t = arrivalTime;
 
-    if (builder.bounceCount >= maxBounces) {
+    if (hit.surface.id === 'floor') floorBounces++;
+    if (builder.bounceCount >= maxBounces || floorBounces >= stopAfterFloor) {
       return builder.finish(t, 'maxBounces');
     }
   }

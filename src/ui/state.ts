@@ -20,6 +20,7 @@ import type {
 import { emptyBoard, type Board, type Play } from '../core/board.js';
 import type { BoardTool } from '../render2d/overlay.js';
 import { presetById, resolvePreset } from '../core/presets.js';
+import type { Alternative, BounceIndex } from '../core/solve.js';
 import { fromShotDoc, type ShotDoc } from '../persist/schema.js';
 import { fromAzimuthElevation, normalize, sub, v3 } from '../core/vec3.js';
 
@@ -51,9 +52,20 @@ export interface AppState {
   serveMode: boolean;
 
   // --- problema inverso (fase 10) ---
-  solveTarget: { x: number; z: number; bounceIndex: 1 | 2 } | null;
+  solveTarget: { x: number; z: number; bounceIndex: BounceIndex } | null;
   /** Mientras esta activo, un clic en la planta elige el objetivo. */
   targetPickMode: boolean;
+  /**
+   * Dejar al solver cambiar tambien la velocidad. La prueba SIEMPRE primero
+   * con la actual: solo la toca si con ella no hay tiro posible.
+   */
+  solveSearchSpeed: boolean;
+  /**
+   * Formas distintas de dejar el bote pedido en el mismo sitio (kill,
+   * pase, ceiling...). Se ofrecen como botones mientras el tiro actual sea
+   * una de ellas.
+   */
+  solveAlternatives: Alternative[];
 
   // --- pizarra tactica (fase 9) ---
   board: Board;
@@ -92,24 +104,32 @@ export const deriveShot = (s: {
 
 export const simOptionsFor = (model: PhysicsModel): SimOptions => ({ model });
 
+/**
+ * Tiro con el que abre la app: un pase por la izquierda que bota a 9 m,
+ * sale de la trasera y vuelve a botar dos veces. Se eligio con el propio
+ * solver. Abria con un tiro geometrico recto, y sin gravedad la pelota no
+ * da ni un bote de piso: las tarjetas de botes, que son lo que mas importa
+ * leer, salian vacias al entrar.
+ */
+const INITIAL = { azimuthDeg: -6.5, elevationDeg: 0.5 } as const;
 const initialOrigin = v3(COURT.width / 2, DEFAULT_CONTACT_HEIGHT, 8.2);
 const initialShot = deriveShot({
   origin: initialOrigin,
-  azimuthDeg: 0,
-  elevationDeg: 4,
+  azimuthDeg: INITIAL.azimuthDeg,
+  elevationDeg: INITIAL.elevationDeg,
   speed: SPEED.default,
 });
 
 export const state: AppState = {
   origin: initialOrigin,
-  azimuthDeg: 0,
-  elevationDeg: 4,
+  azimuthDeg: INITIAL.azimuthDeg,
+  elevationDeg: INITIAL.elevationDeg,
   speed: SPEED.default,
-  model: 'geometric',
+  model: 'ballistic',
   presetId: null,
 
   shot: initialShot,
-  trajectory: simulate(initialShot, { model: 'geometric' }),
+  trajectory: simulate(initialShot, { model: 'ballistic' }),
 
   playhead: 0,
   playing: false,
@@ -127,6 +147,8 @@ export const state: AppState = {
 
   solveTarget: null,
   targetPickMode: false,
+  solveSearchSpeed: true,
+  solveAlternatives: [],
 
   inputMode: 'sliders',
   aim: null,

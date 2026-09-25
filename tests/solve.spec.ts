@@ -142,17 +142,186 @@ describe('metodo de disparo con el motor balistico', () => {
   });
 });
 
-describe('segundo bote', () => {
-  it('resuelve para que sea el SEGUNDO bote el que caiga en el sitio', () => {
-    const target: AimTarget = { x: 3.0, z: 11.0, bounceIndex: 2 };
-    const r = solveAim({ origin: STANCE, speed: 45, model: 'ballistic' }, target);
-    if (r.ok) {
-      const hit = landing(STANCE, r.azimuthDeg, r.elevationDeg, r.speed, 'ballistic', 2)!;
-      expect(Math.hypot(hit.point.x - target.x, hit.point.z - target.z))
-        .toBeLessThan(0.06);
-    } else {
-      // Si no converge, tiene que decirlo con el error real.
-      expect(r.error).toBeGreaterThan(0);
+describe('segundo y tercer bote de piso', () => {
+  // Antes este test aceptaba que el solver no convergiera. Gael quiere
+  // arrastrar el 2.º bote y que el tiro se recalcule: tiene que salir.
+  const landsWithin = (target: AimTarget, speed: number, cm: number) => {
+    const r = solveAim({ origin: STANCE, speed, model: 'ballistic' }, target);
+    expect(r.ok, `${JSON.stringify(target)} a ${speed} m/s: ${r.note}`).toBe(true);
+    const hit = landing(STANCE, r.azimuthDeg, r.elevationDeg, r.speed, 'ballistic', target.bounceIndex)!;
+    expect(
+      Math.hypot(hit.point.x - target.x, hit.point.z - target.z),
+    ).toBeLessThan(cm / 100);
+    return r;
+  };
+
+  it('coloca el 2.º bote a menos de 5 cm del punto pedido', () => {
+    for (const [x, z] of [
+      [3.0, 11.0],
+      [0.6, 10.5],
+      [5.5, 9.5],
+      [1.8, 8.5],
+    ] as const) {
+      landsWithin({ x, z, bounceIndex: 2 }, 45, 5);
     }
+  });
+
+  it('resuelve a varias velocidades sin tocar la fuerza', () => {
+    for (const speed of [30, 60]) {
+      const r = landsWithin({ x: 4.3, z: 10.5, bounceIndex: 2 }, speed, 5);
+      expect(r.speed).toBe(speed);
+    }
+  });
+
+  it('tambien el 3.er bote', () => {
+    landsWithin({ x: 3.05, z: 10.0, bounceIndex: 3 }, 45, 5);
+    landsWithin({ x: 1.2, z: 8.0, bounceIndex: 3 }, 45, 5);
+  });
+
+  it('el punto de mira es donde la pelota pega de verdad en la frontal', () => {
+    const target: AimTarget = { x: 2.0, z: 10.5, bounceIndex: 2 };
+    const r = solveAim({ origin: STANCE, speed: 45, model: 'ballistic' }, target);
+    const traj = simulate(
+      { origin: STANCE, direction: fromAzimuthElevation(r.azimuthDeg, r.elevationDeg), speed: r.speed },
+      { model: 'ballistic' },
+    );
+    const front = traj.bounces.find((b) => b.surface === 'front')!;
+    expect(r.aimPoint!.x).toBeCloseTo(front.point.x, 6);
+    expect(r.aimPoint!.y).toBeCloseTo(front.point.y, 6);
+  });
+});
+
+describe('continuidad al arrastrar un bote', () => {
+  it('partiendo del tiro actual, un arrastre corto cambia el tiro poco', () => {
+    // Tiro de partida y donde cae su 2.º bote.
+    const az0 = -6.5;
+    const el0 = 0.5;
+    const b2 = landing(STANCE, az0, el0, 45, 'ballistic', 2)!;
+
+    // Se arrastra ese bote medio metro.
+    const target: AimTarget = { x: b2.point.x + 0.4, z: b2.point.z + 0.3, bounceIndex: 2 };
+    const r = solveAim(
+      { origin: STANCE, speed: 45, model: 'ballistic', seed: [az0, el0] },
+      target,
+    );
+    expect(r.ok).toBe(true);
+    expect(Math.abs(r.azimuthDeg - az0)).toBeLessThan(5);
+    expect(Math.abs(r.elevationDeg - el0)).toBeLessThan(5);
+  });
+
+  it('arrastrar el 2.º bote al otro rincon no convierte un pase en un kill', () => {
+    // El caso real que salio al probarlo en el navegador. Desde (3.05,
+    // 0.9, 8.2) a 45 m/s hay varias familias de tiros que dejan el 2.º
+    // bote en el rincon trasero derecho: un kill que bota a 1.2 m de la
+    // frontal, un pase cruzado que bota a 6 m, un ceiling... Comparando
+    // angulos ganaba el kill. Conservando los botes anteriores, el pase.
+    const origin = v3(3.05, 0.9, 8.2);
+    const b1Before = landing(origin, -6.5, 0.5, 45, 'ballistic', 1)!;
+    const r = solveAim(
+      {
+        origin,
+        speed: 45,
+        model: 'ballistic',
+        seed: [-6.5, 0.5],
+        keepBounces: [{ x: b1Before.point.x, z: b1Before.point.z }],
+      },
+      { x: 4.6, z: 10.8, bounceIndex: 2 },
+    );
+    expect(r.ok, r.note).toBe(true);
+    const b1After = landing(origin, r.azimuthDeg, r.elevationDeg, r.speed, 'ballistic', 1)!;
+    // El 1.er bote no se va pegado a la frontal: sigue en media cancha.
+    expect(b1After.point.z).toBeGreaterThan(4.5);
+  });
+});
+
+describe('alternativas', () => {
+  it('ofrece varias formas de dejar el 2.º bote, una por tipo de tiro', () => {
+    const origin = v3(3.05, 0.9, 8.2);
+    const b1 = landing(origin, -6.5, 0.5, 45, 'ballistic', 1)!;
+    const r = solveAim(
+      {
+        origin,
+        speed: 45,
+        model: 'ballistic',
+        seed: [-6.5, 0.5],
+        keepBounces: [{ x: b1.point.x, z: b1.point.z }],
+        firstSurface: 'front',
+      },
+      { x: 4.6, z: 10.8, bounceIndex: 2 },
+    );
+    const alts = r.alternatives ?? [];
+    expect(alts.length).toBeGreaterThanOrEqual(2);
+    expect(alts.length).toBeLessThanOrEqual(4);
+    // Un tipo de tiro por opcion.
+    expect(new Set(alts.map((a) => a.kindLabel)).size).toBe(alts.length);
+    // La elegida es la primera, y todas dejan el bote donde se pidio.
+    expect(alts[0]!.azimuthDeg).toBe(r.azimuthDeg);
+    for (const a of alts) {
+      const hit = landing(origin, a.azimuthDeg, a.elevationDeg, a.speed, 'ballistic', 2)!;
+      expect(Math.hypot(hit.point.x - 4.6, hit.point.z - 10.8)).toBeLessThan(0.06);
+    }
+  });
+
+  it('por defecto conserva que el tiro abra por la frontal', () => {
+    const origin = v3(3.05, 0.9, 8.2);
+    const b1 = landing(origin, -6.5, 0.5, 45, 'ballistic', 1)!;
+    const r = solveAim(
+      {
+        origin,
+        speed: 45,
+        model: 'ballistic',
+        seed: [-6.5, 0.5],
+        keepBounces: [{ x: b1.point.x, z: b1.point.z }],
+        firstSurface: 'front',
+      },
+      { x: 4.6, z: 10.8, bounceIndex: 2 },
+    );
+    expect(r.family!.startsWith('F')).toBe(true);
+    expect(r.kindLabel).toBe('passing shot');
+  });
+});
+
+describe('solo tiros legales', () => {
+  const isLegal = (az: number, el: number, speed: number, origin = STANCE) => {
+    const t = simulate(
+      { origin, direction: fromAzimuthElevation(az, el), speed },
+      { model: 'ballistic' },
+    );
+    const front = t.bounces.findIndex((b) => b.surface === 'front');
+    const floor = t.bounces.findIndex((b) => b.surface === 'floor');
+    return front !== -1 && (floor === -1 || front < floor);
+  };
+
+  it('un objetivo delante del jugador no se resuelve con un skip', () => {
+    // Tirar al suelo delante de uno mismo seria la forma "facil" de poner
+    // el 1.er bote ahi. Es un skip: el punto se pierde. No vale.
+    const target: AimTarget = { x: 3.05, z: 6.0, bounceIndex: 1 };
+    const r = solveAim({ origin: STANCE, speed: 45, model: 'ballistic' }, target);
+    expect(isLegal(r.azimuthDeg, r.elevationDeg, r.speed)).toBe(true);
+  });
+
+  it('toda solucion del barrido de 2.º bote es legal', () => {
+    for (const [x, z] of [
+      [0.6, 7.5],
+      [3.05, 9.5],
+      [5.5, 11.5],
+    ] as const) {
+      const r = solveAim({ origin: STANCE, speed: 45, model: 'ballistic' }, { x, z, bounceIndex: 2 });
+      expect(isLegal(r.azimuthDeg, r.elevationDeg, r.speed), `${x},${z}`).toBe(true);
+    }
+  });
+});
+
+describe('parada temprana del motor', () => {
+  it('stopAfterFloorBounces corta en el bote pedido sin mover ese bote', () => {
+    const shot = { origin: STANCE, direction: fromAzimuthElevation(10, 6), speed: 45 };
+    const full = simulate(shot, { model: 'ballistic' });
+    const cut = simulate(shot, { model: 'ballistic', stopAfterFloorBounces: 2 });
+    const floorsCut = cut.bounces.filter((b) => b.surface === 'floor');
+    const floorsFull = full.bounces.filter((b) => b.surface === 'floor');
+    expect(floorsCut).toHaveLength(2);
+    expect(floorsCut[1]!.point.x).toBe(floorsFull[1]!.point.x);
+    expect(floorsCut[1]!.point.z).toBe(floorsFull[1]!.point.z);
+    expect(cut.totalTime).toBeLessThan(full.totalTime);
   });
 });

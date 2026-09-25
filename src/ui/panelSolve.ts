@@ -8,7 +8,12 @@
 
 import { COURT } from '../core/constants.js';
 import { CENTER_BOX } from '../core/court.js';
-import { NAMED_TARGETS, solveAim, type SolveResult } from '../core/solve.js';
+import {
+  NAMED_TARGETS,
+  solveAim,
+  type BounceIndex,
+  type SolveResult,
+} from '../core/solve.js';
 import { clearNode, el, slider, type SliderHandle } from './dom.js';
 import type { PanelView } from './panels.js';
 import { state, update } from './state.js';
@@ -18,9 +23,8 @@ const metres = (v: number): string => `${v.toFixed(2)} m`;
 export const createSolvePanel = (): PanelView => {
   const root = el('div', { class: 'panel-view' });
   const result = el('div', { class: 'solve-result' });
-  let searchSpeed = true;
 
-  const setTarget = (x: number, z: number, bounceIndex?: 1 | 2): void => {
+  const setTarget = (x: number, z: number, bounceIndex?: BounceIndex): void => {
     update({
       solveTarget: {
         x,
@@ -84,23 +88,24 @@ export const createSolvePanel = (): PanelView => {
     'aria-label': 'Que bote debe caer ahi',
   }) as HTMLSelectElement;
   bounceSelect.append(
-    el('option', { value: '1', text: '1er bote en el piso' }),
-    el('option', { value: '2', text: '2o bote en el piso' }),
+    el('option', { value: '1', text: '1.er bote de piso' }),
+    el('option', { value: '2', text: '2.º bote de piso' }),
+    el('option', { value: '3', text: '3.er bote de piso' }),
   );
   bounceSelect.addEventListener('change', () => {
     const t = state.solveTarget;
-    if (t) setTarget(t.x, t.z, Number(bounceSelect.value) as 1 | 2);
+    if (t) setTarget(t.x, t.z, Number(bounceSelect.value) as BounceIndex);
   });
 
   const speedToggle = el('label', { class: 'toggle-row' }, [
     (() => {
       const input = el('input', {
         type: 'checkbox',
-        checked: true,
+        checked: state.solveSearchSpeed,
         'data-field': 'search-speed',
       }) as HTMLInputElement;
       input.addEventListener('change', () => {
-        searchSpeed = input.checked;
+        update({ solveSearchSpeed: input.checked });
       });
       return input;
     })(),
@@ -154,9 +159,10 @@ export const createSolvePanel = (): PanelView => {
     update({
       azimuthDeg: r.azimuthDeg,
       elevationDeg: r.elevationDeg,
-      speed: Math.round(r.speed),
+      speed: r.speed,
       aim: r.aimPoint,
       presetId: null,
+      solveAlternatives: r.alternatives ?? [],
     });
   };
 
@@ -177,7 +183,10 @@ export const createSolvePanel = (): PanelView => {
         origin: state.origin,
         speed: state.speed,
         model: state.model,
-        searchSpeed,
+        searchSpeed: state.solveSearchSpeed,
+        // Se piden alternativas: tambien aqui hay varias formas de llegar.
+        seed: [state.azimuthDeg, state.elevationDeg],
+        firstSurface: state.trajectory.bounces[0]?.surface,
       },
       target,
     );

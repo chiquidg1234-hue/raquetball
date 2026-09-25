@@ -61,6 +61,50 @@ let activePanel = 'shot';
 
 // ------------------------------------------------------------- vistas 2D
 
+const sameShot = (a: { azimuthDeg: number; elevationDeg: number; speed: number }): boolean =>
+  Math.abs(a.azimuthDeg - state.azimuthDeg) < 1e-3 &&
+  Math.abs(a.elevationDeg - state.elevationDeg) < 1e-3 &&
+  Math.abs(a.speed - state.speed) < 1e-3;
+
+/**
+ * Casi siempre hay varias formas de dejar un bote en el mismo sitio. Se
+ * ofrecen mientras el tiro actual sea una de ellas; en cuanto se toca un
+ * slider y el tiro deja de serlo, desaparecen solas.
+ */
+const syncChoices = (): void => {
+  const host = document.getElementById('solve-choices');
+  if (!host) return;
+  const alts = state.solveAlternatives;
+  const current = alts.find(sameShot);
+  if (alts.length < 2 || !current) {
+    host.hidden = true;
+    return;
+  }
+  clearNode(host);
+  host.append(el('div', { class: 'choices-title', text: 'Otras formas de dejarlo ahi' }));
+  for (const alt of alts) {
+    const b = el('button', {
+      class: alt === current ? 'choice choice--active' : 'choice',
+      type: 'button',
+      title: alt.family,
+    }, [
+      el('span', { class: 'choice-kind', text: alt.kindLabel }),
+      el('span', { class: 'choice-seq', text: alt.family }),
+    ]);
+    b.addEventListener('click', () =>
+      update({
+        azimuthDeg: alt.azimuthDeg,
+        elevationDeg: alt.elevationDeg,
+        speed: alt.speed,
+        presetId: null,
+        aim: null,
+      }),
+    );
+    host.append(b);
+  }
+  host.hidden = false;
+};
+
 /** Leyenda de la planta: bote de piso frente a rebote de pared. */
 const legend = (): HTMLElement =>
   el('div', { class: 'viewport-legend', 'aria-hidden': 'true' }, [
@@ -88,6 +132,11 @@ const mount2D = (): void => {
     if (projection.id === 'plan') host.appendChild(legend());
     views.set(projection.id, view);
   }
+
+  // Formas alternativas de dejar el bote arrastrado en el mismo sitio.
+  mustGet('viewport-plan').appendChild(
+    el('div', { class: 'choices', id: 'solve-choices', hidden: true }),
+  );
 
   // Aviso de skip: tiene que verse encima de la cancha, no solo como una
   // etiqueta en el panel lateral.
@@ -562,6 +611,9 @@ const redraw = (changed?: ReadonlySet<string>): void => {
   if (trajectoryChanged) {
     const banner = document.getElementById('skip-banner');
     if (banner) banner.hidden = !isSkip(state.trajectory);
+  }
+  if (!changed || changed.has('shot') || changed.has('solveAlternatives')) {
+    syncChoices();
   }
 
   syncTimeline();
