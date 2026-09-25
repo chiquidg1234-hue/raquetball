@@ -78,8 +78,18 @@ export interface SimOptions {
   sampleDt?: number;
   /** COR normal por superficie. Sobrescribe el valor global. */
   surfaceRestitution?: Partial<Record<SurfaceId, number>>;
-  /** Restitucion tangencial. */
+  /** Restitucion tangencial, para todas las superficies. */
   tangentialRestitution?: number;
+  /**
+   * Restitucion tangencial por superficie (sitio de juego). Gana a
+   * `tangentialRestitution`.
+   */
+  surfaceTangential?: Partial<Record<SurfaceId, number>>;
+  /**
+   * Constante de arrastre k (1/m), a = -k|v|v. Depende del aire del sitio
+   * de juego (src/core/atmosphere.ts). Sin ella, la de nivel del mar y 20 C.
+   */
+  dragK?: number;
   /** Desactivar el arrastre (solo para tests de validacion del COR). */
   disableDrag?: boolean;
   /** Desactivar la gravedad (solo para tests). */

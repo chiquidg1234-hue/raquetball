@@ -8,6 +8,7 @@ import {
   IN,
   SIM,
 } from '../src/core/constants.js';
+import { BALL_TEST_AIR, airDensity, dragConstant } from '../src/core/atmosphere.js';
 import { CENTER_BOX, penetrationDepth } from '../src/core/court.js';
 import { simulateBallistic } from '../src/core/engine-ballistic.js';
 import { PRESETS, resolvePreset } from '../src/core/presets.js';
@@ -28,8 +29,16 @@ const energy = (p: { y: number }, v: { x: number; y: number; z: number }) =>
 // ---------------------------------------------------------------- arrastre
 
 describe('el arrastre domina sobre la gravedad', () => {
-  it('k vale 0.0194 1/m con los valores oficiales', () => {
-    expect(DRAG_K).toBeCloseTo(0.0194, 4);
+  it('k vale 0.0194 1/m a nivel del mar y 20 C', () => {
+    // Antes era una constante con rho = 1.20 y daba 0.01939. Ahora sale de
+    // la atmosfera estandar: a nivel del mar y 20 C rho = 1.2041 kg/m3 y
+    // k = 0.01945. Sigue siendo "0.0194" del spec; lo que cambio es que ya
+    // no vale en todas partes: en El Alto es 0.0116 (tests/venue.spec.ts).
+    expect(DRAG_K).toBeCloseTo(0.01945, 5);
+    expect(DRAG_K).toBeCloseTo(0.0194, 3);
+    expect(
+      dragConstant(airDensity({ altitude: 0, temperatureC: 20 }), BALL),
+    ).toBe(DRAG_K);
   });
 
   it('reproduce la tabla de aceleraciones del spec', () => {
@@ -55,11 +64,24 @@ describe('el arrastre domina sobre la gravedad', () => {
 // ------------------------------------------- criterios de aceptacion §6.3
 
 describe('criterios de aceptacion del motor balistico', () => {
-  it('1. caida libre desde 100 in sin arrastre rebota a 70 in ± 2 cm', () => {
-    const dropHeight = 100 * IN; // 2.54 m
+  it('1. soltada desde 100 in en el aire de la prueba rebota a 70 in ± 2 cm', () => {
+    // La prueba de homologacion es CON aire. Antes el test quitaba el
+    // arrastre porque el COR se habia sacado con sqrt(70/100), que ignora
+    // el aire; con ese COR y el aire puesto, la pelota rebotaba a 64.6 in y
+    // no pasaba su propia norma. Ahora el COR sale de la prueba con
+    // arrastre (0.872) y el test hace la prueba tal cual es.
+    const dropHeight = 100 * IN; // 2.54 m, medidos desde el piso a la pelota
     const traj = simulateBallistic(
-      { origin: v3(COURT.width / 2, dropHeight, COURT.length / 2), direction: v3(0, -1, 0), speed: 0 },
-      { disableDrag: true, maxBounces: 2, maxTime: 4 },
+      {
+        origin: v3(COURT.width / 2, dropHeight + BALL.radius, COURT.length / 2),
+        direction: v3(0, -1, 0),
+        speed: 0,
+      },
+      {
+        dragK: dragConstant(airDensity(BALL_TEST_AIR), BALL),
+        maxBounces: 2,
+        maxTime: 4,
+      },
     );
 
     const first = traj.bounces[0]!;
@@ -68,8 +90,23 @@ describe('criterios de aceptacion del motor balistico', () => {
     const apex = Math.max(
       ...traj.samples.filter((s) => s.t > first.time).map((s) => s.p.y),
     );
-    expect(apex).toBeCloseTo(70 * IN, 1);
-    expect(Math.abs(apex - 70 * IN)).toBeLessThan(0.02);
+    const rebound = apex - BALL.radius;
+    expect(Math.abs(rebound - 70 * IN)).toBeLessThan(0.02);
+    expect(rebound).toBeGreaterThan(68 * IN);
+    expect(rebound).toBeLessThan(72 * IN);
+  });
+
+  it('1b. sin arrastre, el rebote es exactamente COR^2 de la caida', () => {
+    const drop = 2.5;
+    const traj = simulateBallistic(
+      { origin: v3(3, drop + BALL.radius, 6), direction: v3(0, -1, 0), speed: 0 },
+      { disableDrag: true, maxBounces: 2, maxTime: 4 },
+    );
+    const first = traj.bounces[0]!;
+    const apex = Math.max(
+      ...traj.samples.filter((s) => s.t > first.time).map((s) => s.p.y),
+    );
+    expect(apex - BALL.radius).toBeCloseTo(BALL.restitution ** 2 * drop, 2);
   });
 
   it('2. la energia total nunca aumenta entre dos muestras consecutivas', () => {

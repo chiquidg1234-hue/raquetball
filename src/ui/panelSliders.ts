@@ -90,7 +90,7 @@ export const createShotPanel = (): PanelView => {
     step: 1,
     value: state.speed,
     format: speedText,
-    hint: `peloteo ~${SPEED.rallyComfortable} · drive ~${SPEED.drive} · saque pro ~${SPEED.proServe} m/s`,
+    hint: `saque pro ~${Math.round(SPEED.proServe)} m/s (150 mph) · open ~${Math.round(SPEED.hardAmateurServe)} · récord ~${Math.round(SPEED.recordServe)}`,
     onInput: (v) => update({ speed: v, presetId: null }),
   });
 

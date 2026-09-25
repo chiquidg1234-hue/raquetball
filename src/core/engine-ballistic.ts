@@ -3,8 +3,9 @@
  *
  *   a = (0, -g, 0) - k * |v| * v      con k = 0.5 * rho * Cd * A / m
  *
- * Con los valores oficiales k = 0.0194 1/m, lo que significa que el
- * arrastre pesa 1.8 g a 30 m/s y 14.3 g a 85 m/s: DOMINA SOBRE LA
+ * A nivel del mar k = 0.0194 1/m (en El Alto, 0.0116: ver atmosphere.ts),
+ * lo que significa que el arrastre pesa 1.8 g a 30 m/s y 14.3 g a 85 m/s
+ * a nivel del mar: DOMINA SOBRE LA
  * GRAVEDAD en todo el rango util. No es un refinamiento opcional; sin el,
  * las trayectorias rapidas no desaceleran y los rebotes tardios quedan
  * demasiado vivos.
@@ -47,9 +48,9 @@ interface Accel {
   (v: Vec3): Vec3;
 }
 
-const makeAccel = (drag: boolean, gravity: boolean): Accel => {
+const makeAccel = (dragK: number, gravity: boolean): Accel => {
   const g = gravity ? GRAVITY : 0;
-  const k = drag ? DRAG_K : 0;
+  const k = dragK;
   return (v: Vec3): Vec3 => {
     const speed = length(v);
     const c = k * speed;
@@ -61,8 +62,8 @@ const makeAccel = (drag: boolean, gravity: boolean): Accel => {
  * Rebote: se descompone la velocidad entrante en normal y tangencial
  * respecto a la superficie y se aplica una restitucion a cada una.
  *
- *   v_n' = -e_n * v_n     e_n = COR de esa superficie (0.837)
- *   v_t' =  e_t * v_t     e_t = restitucion tangencial (0.65)
+ *   v_n' = -e_n * v_n     e_n = COR de esa superficie (0.872 por defecto)
+ *   v_t' =  e_t * v_t     e_t = restitucion tangencial (0.65 por defecto)
  */
 export const bounceVelocity = (
   v: Vec3,
@@ -90,8 +91,15 @@ export const simulateBallistic = (
   const tangential = opts.tangentialRestitution ?? BALL.tangentialRestitution;
   const corOf = (id: keyof typeof SURFACE_COR): number =>
     opts.surfaceRestitution?.[id] ?? SURFACE_COR[id];
+  const tangentialOf = (id: keyof typeof SURFACE_COR): number =>
+    opts.surfaceTangential?.[id] ?? tangential;
+  const dragK = opts.disableDrag
+    ? 0
+    : opts.dragK != null && opts.dragK >= 0
+      ? opts.dragK
+      : DRAG_K;
 
-  const accel = makeAccel(!opts.disableDrag, !opts.disableGravity);
+  const accel = makeAccel(dragK, !opts.disableGravity);
   const builder = new TrajectoryBuilder(
     defaultSampleDt(opts.sampleDt),
     'ballistic',
@@ -188,7 +196,7 @@ export const simulateBallistic = (
         vIn,
         hit.surface,
         corOf(hit.surface.id),
-        tangential,
+        tangentialOf(hit.surface.id),
       );
 
       // Se guarda la velocidad SALIENTE en la muestra del contacto: asi la

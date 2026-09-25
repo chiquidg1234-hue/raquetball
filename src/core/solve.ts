@@ -28,7 +28,7 @@ import { readableSequence } from './contacts.js';
 import { CENTER_BOX } from './court.js';
 import { CLASS_LABEL, classify } from './rules.js';
 import { simulate } from './engine.js';
-import type { PhysicsModel, Shot, Trajectory, Vec3 } from './types.js';
+import type { PhysicsModel, Shot, SimOptions, Trajectory, Vec3 } from './types.js';
 import { fromAzimuthElevation, normalize, sub } from './vec3.js';
 
 /** Que bote de PISO se quiere colocar. Solo los tres primeros importan. */
@@ -67,6 +67,12 @@ export interface SolveOptions {
   origin: Vec3;
   speed: number;
   model: PhysicsModel;
+  /**
+   * El aire, la pelota y las superficies del sitio de juego
+   * (`venueSimOptions`). Sin esto el solver apuntaria con el aire de nivel
+   * del mar aunque se juegue en El Alto, y el bote caeria en otro sitio.
+   */
+  physics?: Pick<SimOptions, 'dragK' | 'surfaceRestitution' | 'surfaceTangential'>;
   /** Tambien buscar la velocidad, no solo los angulos. */
   searchSpeed?: boolean;
   maxIterations?: number;
@@ -172,6 +178,7 @@ const runShot = (
   speed: number,
   model: PhysicsModel,
   bounceIndex: BounceIndex,
+  physics: SolveOptions['physics'],
 ): Trajectory => {
   const shot: Shot = {
     origin,
@@ -179,6 +186,7 @@ const runShot = (
     speed,
   };
   return simulate(shot, {
+    ...physics,
     model,
     maxBounces: 12,
     stopAfterFloorBounces: bounceIndex,
@@ -208,6 +216,7 @@ const evaluate = (
     speed,
     opts.model,
     target.bounceIndex,
+    opts.physics,
   );
   const floors = trajectory.bounces.filter((b) => b.surface === 'floor');
   const wanted = floors[target.bounceIndex - 1];
@@ -608,8 +617,9 @@ const describe = (
     speed,
   };
   // Para clasificar hace falta el tiro entero, no el recortado del solver.
-  const full = simulate(shot, { model: opts.model });
+  const full = simulate(shot, { ...opts.physics, model: opts.model });
   const upToTarget = simulate(shot, {
+    ...opts.physics,
     model: opts.model,
     maxBounces: 12,
     stopAfterFloorBounces: target.bounceIndex,
