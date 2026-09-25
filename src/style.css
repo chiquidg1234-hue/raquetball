@@ -1687,3 +1687,26 @@ a.btn {
   line-height: 1.4;
   pointer-events: none;
 }
+
+/* Rollout / nick: el mismo verde en el inspector y en las vistas. */
+.roll-label {
+  fill: #4dd4ac;
+  font-weight: 800;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: var(--bg, #0b0f14);
+  stroke-width: 0.06;
+}
+.crack-note {
+  border-left: 3px solid var(--line, #2a3340);
+  padding-left: 8px;
+}
+.crack-note--rollout {
+  border-left-color: #4dd4ac;
+  color: #9ff0d4;
+}
+.crack-note--flat,
+.crack-note--near {
+  border-left-color: #e0b44c;
+}

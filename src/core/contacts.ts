@@ -55,6 +55,10 @@ export interface Contact {
    * frontal. Es un skip y el punto se pierde.
    */
   skip: boolean;
+  /** Piso: desde aqui la pelota rueda, ya no bota. */
+  rolling: boolean;
+  /** Pared: toco el crack en la franja y salio rodando (nick). */
+  nick: boolean;
 }
 
 export const floorBounces = (t: Trajectory): Bounce[] =>
@@ -81,6 +85,8 @@ export const labelContacts = (t: Trajectory): Contact[] => {
         label: String(floorCount),
         primary: floorCount <= PRIMARY_FLOOR_BOUNCES,
         skip: i === 0,
+        rolling: !!bounce.rolling,
+        nick: false,
       };
     }
     const wallCode = WALL_CODE[bounce.surface];
@@ -92,18 +98,27 @@ export const labelContacts = (t: Trajectory): Contact[] => {
       label: wallCode,
       primary: false,
       skip: false,
+      rolling: false,
+      nick: !!bounce.rollout,
     };
   });
 };
 
 /**
  * "F → D → bote 1 → T → bote 2": como lo cantaria un jugador. Un skip se
- * canta como lo que es, PISO, no como un bote mas.
+ * canta como lo que es, PISO, no como un bote mas. Un nick, como lo que
+ * es: "D (nick) → bote 1 rodando".
  */
 export const readableSequence = (t: Trajectory, limit = 12): string =>
   labelContacts(t)
     .slice(0, limit)
-    .map((c) => (c.skip ? 'PISO' : c.kind === 'floor' ? `bote ${c.label}` : c.label))
+    .map((c) =>
+      c.skip
+        ? 'PISO'
+        : c.kind === 'floor'
+          ? `bote ${c.label}${c.rolling ? ' rodando' : ''}`
+          : `${c.label}${c.nick ? ' (nick)' : ''}`,
+    )
     .join(' → ');
 
 /**

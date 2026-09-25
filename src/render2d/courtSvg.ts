@@ -545,6 +545,14 @@ export class CourtView2D {
         { class: 'floor-num', x: pt.u, y: pt.v, 'font-size': 0.29 },
         g,
       ).textContent = c.label;
+      if (c.rolling) {
+        // Desde aqui ya no bota: rueda (nick o bote que se apaga).
+        svgEl(
+          'text',
+          { class: 'roll-label', x: pt.u, y: pt.v + 0.5, 'font-size': 0.24 },
+          g,
+        ).textContent = 'rueda';
+      }
     } else {
       svgEl('title', {}, g).textContent = `bote ${c.label}`;
     }

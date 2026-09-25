@@ -62,7 +62,7 @@ export const speedColor = (
   return target.copy(RAMP[RAMP.length - 1]!.color);
 };
 
-type ContactStyle = 'floor' | 'wall' | 'skip' | 'toss';
+type ContactStyle = 'floor' | 'wall' | 'skip' | 'toss' | 'roll';
 
 /**
  * Marcador flotante de un contacto. Dos familias que no se confunden:
@@ -71,8 +71,8 @@ type ContactStyle = 'floor' | 'wall' | 'skip' | 'toss';
  */
 const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => {
   const size = 128;
-  // El rotulo del bote de saque es texto, no un numero: lienzo apaisado.
-  const wide = style === 'toss' ? 3 : 1;
+  // Los rotulos de texto (bote de saque, "rueda") van en lienzo apaisado.
+  const wide = style === 'toss' || style === 'roll' ? 3 : 1;
   const canvas = document.createElement('canvas');
   canvas.width = size * wide;
   canvas.height = size;
@@ -105,6 +105,16 @@ const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => 
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = '#d9c6ff';
+  } else if (style === 'roll') {
+    // Donde la pelota sale rodando: verde, como el ROLLOUT del inspector.
+    ctx.fillStyle = '#0d2019';
+    ctx.strokeStyle = '#4dd4ac';
+    ctx.lineWidth = size * 0.05;
+    ctx.beginPath();
+    ctx.roundRect(size * 0.08, size * 0.22, size * wide - size * 0.16, size * 0.56, size * 0.12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#9ff0d4';
   } else {
     ctx.beginPath();
     ctx.arc(c, c, size * 0.38, 0, Math.PI * 2);
@@ -117,7 +127,11 @@ const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => 
   }
 
   const fontSize =
-    style === 'toss' ? size * 0.3 : label.length > 2 ? size * 0.24 : size * 0.44;
+    style === 'toss' || style === 'roll'
+      ? size * 0.3
+      : label.length > 2
+        ? size * 0.24
+        : size * 0.44;
   ctx.font = `800 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -320,6 +334,11 @@ export class TrajectoryLayer {
     const sprite = makeContactSprite(c.skip ? 'PISO' : c.label, style);
     sprite.position.set(x, y + 0.36, z);
     this.gMarkers.add(sprite);
+    if (c.rolling) {
+      const roll = makeContactSprite('rueda', 'roll');
+      roll.position.set(x, y + 0.66, z);
+      this.gMarkers.add(roll);
+    }
   }
 
   setGhosts(list: readonly Trajectory[]): void {

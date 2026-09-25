@@ -14,10 +14,12 @@ import {
   type Contact,
 } from '../core/contacts.js';
 import { SURFACE_BY_ID } from '../core/court.js';
+import { crackReport } from '../core/crack.js';
 import { DEEP_PROBE_Z, analyse } from '../core/rules.js';
-import { pathLength } from '../core/trajectory-utils.js';
-import type { Termination, Trajectory } from '../core/types.js';
-import { length } from '../core/vec3.js';
+import { rpm } from '../core/spin.js';
+import { pathLength, stateAt } from '../core/trajectory-utils.js';
+import type { Bounce, Termination, Trajectory, Vec3 } from '../core/types.js';
+import { dot, length } from '../core/vec3.js';
 import { clearNode, el } from './dom.js';
 import type { PanelView } from './panels.js';
 import { state, update } from './state.js';
@@ -66,6 +68,36 @@ const lateral = (x: number): string =>
     : `a ${(COURT.width - x).toFixed(1)} m de la derecha`;
 
 const ORDINAL = ['1.er', '2.º', '3.er'];
+
+/**
+ * Con que angulo sale de ese contacto, medido desde la normal de la
+ * superficie (0 = perpendicular). Es lo que ensena el efecto: en el Z la
+ * pelota llega a la segunda lateral a ~48 grados y sale a ~8.
+ */
+const fmtAngle = (deg: number | null): string => (deg == null ? '—' : `${deg.toFixed(0)}°`);
+
+/**
+ * Angulo de una velocidad con la normal de la superficie. En las paredes
+ * se mide EN PLANTA (solo x y z): "sale paralelo a la pared del fondo" es
+ * una frase de planta, y la subida o bajada de la pelota no cuenta. En el
+ * piso y el techo, el angulo de verdad con la vertical.
+ */
+const angleFromNormal = (v: Vec3, b: Bounce): number | null => {
+  const n = SURFACE_BY_ID[b.surface].normal;
+  const w = n.y === 0 ? { x: v.x, y: 0, z: v.z } : v;
+  const speed = length(w);
+  if (speed < 1e-9) return null;
+  return (Math.acos(Math.max(-1, Math.min(1, Math.abs(dot(w, n)) / speed))) * 180) / Math.PI;
+};
+
+/** Con que angulo llega y sale de ese contacto (0 = perpendicular). */
+const contactAngles = (t: Trajectory, b: Bounce): [number | null, number | null] => {
+  if (b.velocityIn && b.velocityOut) {
+    return [angleFromNormal(b.velocityIn, b), angleFromNormal(b.velocityOut, b)];
+  }
+  const s = stateAt(t, b.time);
+  return [b.incidenceAngleDeg, s ? angleFromNormal(s.v, b) : null];
+};
 
 export const createInspectorPanel = (): PanelView => {
   const root = el('div', { class: 'panel-view' });
@@ -125,10 +157,12 @@ export const createInspectorPanel = (): PanelView => {
             el('strong', {
               text: c.skip
                 ? 'PISO antes que la frontal: skip'
-                : `a ${b.point.z.toFixed(1)} m de la frontal`,
+                : `a ${b.point.z.toFixed(1)} m de la frontal${c.rolling ? ' · sale rodando' : ''}`,
             }),
             el('span', {
-              text: `${lateral(b.point.x)} · ${b.time.toFixed(2)} s · llega a ${b.incomingSpeed.toFixed(0)} m/s`,
+              text: c.rolling
+                ? `${lateral(b.point.x)} · ${b.time.toFixed(2)} s · ya no bota: rueda a ${b.outgoingSpeed.toFixed(0)} m/s`
+                : `${lateral(b.point.x)} · ${b.time.toFixed(2)} s · llega a ${b.incomingSpeed.toFixed(0)} m/s`,
             }),
           ]),
         ],
@@ -153,6 +187,8 @@ export const createInspectorPanel = (): PanelView => {
     if (a.serve) {
       badges.append(badge(a.serve.label, a.serve.legal ? 'ok' : 'bad'));
     }
+    const crack = trajectory.model === 'ballistic' ? crackReport(trajectory) : null;
+    if (crack?.kind === 'rollout') badges.append(badge('ROLLOUT: sale rodando', 'ok'));
     verdict.append(badges);
     if (trajectory.bounces.length > 0) {
       verdict.append(
@@ -162,6 +198,15 @@ export const createInspectorPanel = (): PanelView => {
       );
     }
     verdict.append(el('div', { class: 'verdict-detail', text: a.classDetail }));
+    if (crack) {
+      verdict.append(
+        el('div', {
+          class: `verdict-detail crack-note crack-note--${crack.kind}`,
+          'data-crack': crack.kind,
+          text: crack.text,
+        }),
+      );
+    }
     if (!a.ret.legal) {
       verdict.append(el('div', { class: 'verdict-detail', text: a.ret.detail }));
     }
@@ -250,13 +295,22 @@ export const createInspectorPanel = (): PanelView => {
     }
 
     const table = el('table', { class: 'inspector-table' });
+    const spinOn = trajectory.bounces.some((b) => b.spinOut);
     const head = el('tr', {}, [
       el('th', { text: '' }),
       el('th', { text: 'donde' }),
       el('th', { text: 't (s)' }),
       el('th', { text: 'alto' }),
       el('th', { text: 'v' }),
-      el('th', { text: 'ang' }),
+      el('th', {
+        text: 'llega',
+        title: 'Angulo de llegada desde la normal (en las paredes, visto en planta)',
+      }),
+      el('th', {
+        text: 'sale',
+        title: 'Angulo de salida desde la normal (en las paredes, en planta): el efecto lo cambia. En el Z, casi 0: sale paralelo a la pared del fondo',
+      }),
+      ...(spinOn ? [el('th', { text: 'giro', title: 'Giro al salir, en rpm' })] : []),
     ]);
     table.append(el('thead', {}, [head]));
 
@@ -275,7 +329,22 @@ export const createInspectorPanel = (): PanelView => {
           el('td', { text: b.time.toFixed(3) }),
           el('td', { text: `${b.point.y.toFixed(2)} m` }),
           el('td', { text: b.outgoingSpeed.toFixed(0) }),
-          el('td', { text: `${b.incidenceAngleDeg.toFixed(0)}°` }),
+          el('td', { text: fmtAngle(contactAngles(trajectory, b)[0]) }),
+          el('td', {
+            text: c.rolling ? 'rueda' : c.nick ? 'nick' : fmtAngle(contactAngles(trajectory, b)[1]),
+          }),
+          ...(spinOn
+            ? [
+                el('td', {
+                  text: b.spinOut
+                    ? `${(rpm(length(b.spinOut)) / 1000).toFixed(1)}k${b.slipped ? ' ·desl' : ''}`
+                    : '—',
+                  title: b.slipped
+                    ? 'Deslizo todo el contacto: la friccion no alcanzo para agarrarla'
+                    : 'Agarro: el punto de contacto salio casi quieto',
+                }),
+              ]
+            : []),
         ],
       );
       row.title = `x ${b.point.x.toFixed(2)}  y ${b.point.y.toFixed(2)}  z ${b.point.z.toFixed(2)}`;

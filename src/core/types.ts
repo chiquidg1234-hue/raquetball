@@ -46,6 +46,9 @@ export interface Bounce {
   outgoingSpeed: number;
   /** Grados respecto a la normal de la superficie. */
   incidenceAngleDeg: number;
+  /** m/s, velocidad justo antes y justo despues del contacto. */
+  velocityIn?: Vec3;
+  velocityOut?: Vec3;
   /** rad/s, giro al llegar y al salir. Solo el motor balistico con efecto. */
   spinIn?: Vec3;
   spinOut?: Vec3;

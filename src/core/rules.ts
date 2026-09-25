@@ -52,6 +52,7 @@ export interface ReturnJudgement {
 }
 
 export type ShotClass =
+  | 'rollout'
   | 'kill'
   | 'pass'
   | 'ceiling'
@@ -266,6 +267,7 @@ export const deepHeight = (
 // ---------------------------------------------------------- clasificacion
 
 const CLASS_LABEL: Record<ShotClass, string> = {
+  rollout: 'rollout (nick)',
   kill: 'kill shot',
   pass: 'passing shot',
   ceiling: 'ceiling ball',
@@ -289,6 +291,16 @@ export const classify = (
     return {
       classification: 'skip',
       detail: 'Toca el piso antes que la frontal.',
+    };
+  }
+
+  // Si toca el crack en la franja y sale rodando, eso es lo que es, sea
+  // de la frontal (kill) o de la lateral (saque al crack): no bota.
+  const nick = bounces.find((b) => b.rollout);
+  if (nick) {
+    return {
+      classification: 'rollout',
+      detail: `Toca el crack de ${nick.surface === 'front' ? 'la frontal' : 'una lateral'} en la franja y sale rodando: no bota, no hay devolución.`,
     };
   }
 
@@ -323,12 +335,23 @@ export const classify = (
   if (first.surface === 'front') {
     const height = first.point.y;
 
-    // Frontal alta cerca de una lateral y luego esa lateral: tiro en Z.
-    if (height > 1.9 && second && isSide(second.surface)) {
-      return {
-        classification: 'Z',
-        detail: 'Frontal alta y lateral: cruza la cancha y sale paralelo al fondo.',
-      };
+    // Frontal y luego una lateral: tiro en Z si es alto (Z-ball) o si
+    // cruza a la lateral contraria antes del 2.o bote (Z serve bajo). Lo
+    // que lo define es el camino, no la altura.
+    if (second && isSide(second.surface)) {
+      const opposite = second.surface === 'left' ? 'right' : 'left';
+      const secondFloorTime = floors[1]?.time ?? Infinity;
+      const crosses = bounces.some(
+        (b, i) => i > 1 && b.surface === opposite && b.time < secondFloorTime,
+      );
+      if (height > 1.9 || crosses) {
+        return {
+          classification: 'Z',
+          detail: crosses
+            ? 'Frontal, lateral y cruza a la otra lateral: el efecto la saca casi paralela al fondo.'
+            : 'Frontal alta y lateral: cruza la cancha y sale paralelo al fondo.',
+        };
+      }
     }
 
     if (height < 0.45) {

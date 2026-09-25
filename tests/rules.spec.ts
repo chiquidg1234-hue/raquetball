@@ -130,6 +130,14 @@ describe('clasificacion automatica', () => {
   it('reconoce el pinch', () => expectClass('pinch-left', 'pinch'));
   it('reconoce el splat', () => expectClass('splat-left', 'splat'));
   it('reconoce la ceiling ball', () => expectClass('ceiling', 'ceiling'));
+  it('reconoce el Z por su camino, aunque la frontal sea baja', () => {
+    expectClass('z-serve-right', 'Z');
+    expectClass('z-ball-left', 'Z');
+  });
+  it('reconoce el rollout, sea de la frontal o de la lateral', () => {
+    expectClass('kill-crack', 'rollout');
+    expectClass('crack-serve-left', 'rollout');
+  });
   it('reconoce los pases', () => {
     expectClass('cross-court-left', 'pass');
     expectClass('down-the-line-right', 'pass');

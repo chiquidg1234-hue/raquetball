@@ -96,6 +96,8 @@ export class TrajectoryBuilder {
       incomingSpeed: length(args.vIn),
       outgoingSpeed: length(args.vOut),
       incidenceAngleDeg: (Math.acos(cosTheta) * 180) / Math.PI,
+      velocityIn: clone(args.vIn),
+      velocityOut: clone(args.vOut),
     };
     const x = args.extra;
     if (x) {
