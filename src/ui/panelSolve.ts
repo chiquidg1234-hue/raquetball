@@ -181,7 +181,7 @@ export const createSolvePanel = (): PanelView => {
     }
     const r = solveAim(
       {
-        origin: state.origin,
+        origin: state.shot.origin,
         speed: state.speed,
         model: state.model,
         physics: venueSimOptions(state.venue),

@@ -11,7 +11,7 @@ import { isSkip } from './core/contacts.js';
 import { unfoldFirstSideBounce } from './core/unfold.js';
 import { BoardOverlay } from './render2d/overlay.js';
 import { canvasToPng, svgToPng } from './persist/exportPng.js';
-import { fromVenueDoc, toDoc, toVenueDoc } from './persist/schema.js';
+import { toVenueDoc } from './persist/schema.js';
 import { readHashDoc, syncHash } from './persist/share.js';
 import {
   loadBoard,
@@ -46,8 +46,10 @@ import { createBoardPanel } from './ui/panelBoard.js';
 import { createSolvePanel } from './ui/panelSolve.js';
 import { createShotPanel } from './ui/panelSliders.js';
 import {
-  applyShotDoc,
+  applyDoc,
+  currentDoc,
   simOptionsFor,
+  timelineStart,
   state,
   subscribe,
   update,
@@ -545,21 +547,25 @@ const mountTimeline = (): void => {
 
 const togglePlay = (): void => {
   if (!state.playing && state.playhead >= state.trajectory.totalTime - 1e-6) {
-    update({ playhead: 0 });
+    // Desde el principio: en un saque, desde que la pelota sale de la mano.
+    update({ playhead: timelineStart() });
   }
   update({ playing: !state.playing });
 };
 
 const syncTimeline = (): void => {
   const total = Math.max(state.trajectory.totalTime, 1e-3);
+  scrub.min = String(timelineStart());
   scrub.max = String(total);
   if (document.activeElement !== scrub) scrub.value = String(state.playhead);
   // En pantallas estrechas el formato largo se corta a media cifra, que
   // es peor que no mostrarlo: se acorta en vez de truncarse.
   timeLabel.textContent =
-    window.innerWidth < 560
-      ? `${state.playhead.toFixed(2)}/${total.toFixed(1)}s`
-      : `${state.playhead.toFixed(3)} s / ${total.toFixed(2)} s`;
+    state.playhead < 0
+      ? `mano ${state.playhead.toFixed(2)} s`
+      : window.innerWidth < 560
+        ? `${state.playhead.toFixed(2)}/${total.toFixed(1)}s`
+        : `${state.playhead.toFixed(3)} s / ${total.toFixed(2)} s`;
   playButton.textContent = state.playing ? '❚❚' : '▶';
 };
 
@@ -594,6 +600,7 @@ const redraw = (changed?: ReadonlySet<string>): void => {
       aim: state.aim,
       target: state.solveTarget,
       ghosts,
+      toss: state.toss,
     });
   }
 
@@ -609,6 +616,7 @@ const redraw = (changed?: ReadonlySet<string>): void => {
       scene3d.trajectory.setOrigin(state.shot.origin);
       scene3d.trajectory.setGhosts(ghosts);
     }
+    if (!changed || changed.has('toss')) scene3d.trajectory.setToss(state.toss);
     if (!changed || changed.has('aim')) scene3d.trajectory.setAim(state.aim);
     scene3d.trajectory.setPlayhead(state.playhead);
     scene3d.invalidate();
@@ -670,7 +678,7 @@ const mountKeyboard = (): void => {
     }
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      update({ playing: false, playhead: Math.max(0, state.playhead - step) });
+      update({ playing: false, playhead: Math.max(timelineStart(), state.playhead - step) });
       return;
     }
     // Saltar al siguiente rebote / al anterior.
@@ -690,7 +698,7 @@ const mountKeyboard = (): void => {
 
 /** El hash siempre refleja el tiro actual y su cancha: copiar la URL ya comparte. */
 const pushHash = (): void => {
-  syncHash(toDoc(state));
+  syncHash(currentDoc());
 };
 
 const restoreFromUrlAndStorage = (): void => {
@@ -709,11 +717,7 @@ const restoreFromUrlAndStorage = (): void => {
   if (venue) update({ venue });
 
   const doc = readHashDoc();
-  if (doc) {
-    applyShotDoc(doc.shot);
-    // Un enlace v1 no trae cancha: se hizo con el aire de referencia.
-    update({ venue: fromVenueDoc(doc.venue) });
-  }
+  if (doc) applyDoc(doc);
 };
 
 const boot = (): void => {
@@ -733,7 +737,15 @@ const boot = (): void => {
       syncLayout();
       scene3d?.resize();
     }
-    if (changed.has('shot') || changed.has('model') || changed.has('venue')) pushHash();
+    if (
+      changed.has('shot') ||
+      changed.has('model') ||
+      changed.has('venue') ||
+      changed.has('serveToss') ||
+      changed.has('serveMode')
+    ) {
+      pushHash();
+    }
     if (changed.has('venue')) storeVenue(state.venue);
     if (changed.has('layout') || changed.has('mirror') || changed.has('serveMode')) {
       storeViewPrefs({

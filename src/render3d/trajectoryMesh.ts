@@ -24,6 +24,7 @@ import { splitByBounce, stateAt } from '../core/trajectory-utils.js';
 import type { Sample, Trajectory, Vec3 } from '../core/types.js';
 import { length } from '../core/vec3.js';
 import { PALETTE } from './palette.js';
+import type { Toss } from '../core/serveToss.js';
 
 const TUBE_RADIUS = 0.025;
 const RADIAL_SEGMENTS = 8;
@@ -61,7 +62,7 @@ export const speedColor = (
   return target.copy(RAMP[RAMP.length - 1]!.color);
 };
 
-type ContactStyle = 'floor' | 'wall' | 'skip';
+type ContactStyle = 'floor' | 'wall' | 'skip' | 'toss';
 
 /**
  * Marcador flotante de un contacto. Dos familias que no se confunden:
@@ -70,11 +71,14 @@ type ContactStyle = 'floor' | 'wall' | 'skip';
  */
 const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => {
   const size = 128;
+  // El rotulo del bote de saque es texto, no un numero: lienzo apaisado.
+  const wide = style === 'toss' ? 3 : 1;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
+  canvas.width = size * wide;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   const c = size / 2;
+  const cx = (size * wide) / 2;
 
   if (style === 'wall') {
     const h = size * 0.34;
@@ -90,6 +94,17 @@ const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => 
     ctx.strokeStyle = '#8ea5be';
     ctx.stroke();
     ctx.fillStyle = '#8ea5be';
+  } else if (style === 'toss') {
+    // El bote de saque: un cuadrado violeta, ni circulo de piso ni rombo
+    // de pared. Lleva texto, no numero: no cuenta como bote del tiro.
+    ctx.fillStyle = '#1a1326';
+    ctx.strokeStyle = '#b58cff';
+    ctx.lineWidth = size * 0.05;
+    ctx.beginPath();
+    ctx.roundRect(size * 0.08, size * 0.22, size * wide - size * 0.16, size * 0.56, size * 0.12);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#d9c6ff';
   } else {
     ctx.beginPath();
     ctx.arc(c, c, size * 0.38, 0, Math.PI * 2);
@@ -101,11 +116,12 @@ const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => 
     ctx.fillStyle = style === 'skip' ? '#ffffff' : '#1c1405';
   }
 
-  const fontSize = label.length > 2 ? size * 0.24 : size * 0.44;
+  const fontSize =
+    style === 'toss' ? size * 0.3 : label.length > 2 ? size * 0.24 : size * 0.44;
   ctx.font = `800 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, c, c + size * 0.02);
+  ctx.fillText(label, cx, c + size * 0.02, size * wide - size * 0.3);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -117,8 +133,8 @@ const makeContactSprite = (label: string, style: ContactStyle): THREE.Sprite => 
       opacity: 1,
     }),
   );
-  const scale = style === 'floor' || style === 'skip' ? 0.46 : 0.3;
-  sprite.scale.setScalar(scale);
+  const scale = style === 'floor' || style === 'skip' ? 0.46 : style === 'toss' ? 0.3 : 0.3;
+  sprite.scale.set(scale * wide, scale, 1);
   sprite.renderOrder = style === 'wall' ? 9 : 10;
   return sprite;
 };
@@ -220,7 +236,9 @@ export class TrajectoryLayer {
   private readonly gPath = new THREE.Group();
   private readonly gGhosts = new THREE.Group();
   private readonly gMarkers = new THREE.Group();
+  private readonly gToss = new THREE.Group();
   private readonly ball: THREE.Mesh;
+  private toss: Toss | null = null;
   private readonly originMarker: THREE.Group;
   private readonly aimMarker: THREE.Group;
 
@@ -228,7 +246,7 @@ export class TrajectoryLayer {
 
   constructor() {
     this.group.name = 'trajectory';
-    this.group.add(this.gGhosts, this.gPath, this.gMarkers);
+    this.group.add(this.gGhosts, this.gPath, this.gMarkers, this.gToss);
 
     this.ball = new THREE.Mesh(
       new THREE.SphereGeometry(BALL.radius * 1.6, 20, 14),
@@ -314,7 +332,67 @@ export class TrajectoryLayer {
     }
   }
 
+  /**
+   * El bote con la mano del saque, aparte del tiro: tubo fino violeta de la
+   * mano al piso y del piso al golpe, y en el piso un cuadrado con
+   * "bote de saque". No lleva numero: los botes del tiro empiezan despues.
+   */
+  setToss(toss: Toss | null): void {
+    this.toss = toss;
+    disposeTree(this.gToss);
+    if (!toss) return;
+    const color = toss.fault ? 0xef5f5f : 0xb58cff;
+    const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85 });
+    const bounceT = toss.bounce.time;
+    for (const part of [
+      toss.path.samples.filter((sm) => sm.t <= bounceT + 1e-9),
+      toss.path.samples.filter((sm) => sm.t >= bounceT - 1e-9),
+    ]) {
+      if (part.length < 2) continue;
+      const pts = part.map((sm) => new THREE.Vector3(sm.p.x, sm.p.y, sm.p.z));
+      const tube = new THREE.Mesh(
+        new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.012, 6, false),
+        material.clone(),
+      );
+      tube.renderOrder = 5;
+      this.gToss.add(tube);
+    }
+
+    const square = new THREE.Mesh(
+      new THREE.RingGeometry(0.1, 0.17, 4),
+      new THREE.MeshBasicMaterial({
+        color,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+      }),
+    );
+    square.rotation.x = -Math.PI / 2;
+    square.rotation.z = Math.PI / 4;
+    square.position.set(toss.bounce.point.x, 0.007, toss.bounce.point.z);
+    square.renderOrder = 4;
+    this.gToss.add(square);
+
+    const label =
+      toss.fault === 'double-bounce'
+        ? 'saque: 2 botes'
+        : toss.fault === 'toss-outside'
+          ? 'saque: fuera'
+          : 'bote de saque';
+    const sprite = makeContactSprite(label, 'toss');
+    // Al lado, no encima: encima esta la mano y, en el golpe, la raqueta.
+    sprite.position.set(toss.bounce.point.x + 0.62, 0.16, toss.bounce.point.z);
+    this.gToss.add(sprite);
+  }
+
   setPlayhead(t: number | null): void {
+    if (t != null && t < 0 && this.toss) {
+      const st = stateAt(this.toss.path, this.toss.duration + t);
+      this.ball.visible = !!st;
+      if (st) this.ball.position.set(st.p.x, st.p.y, st.p.z);
+      return;
+    }
     if (t == null || !this.trajectory) {
       this.ball.visible = false;
       return;

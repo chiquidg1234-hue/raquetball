@@ -75,10 +75,19 @@ export interface VenueDoc {
   ft: number;
 }
 
+/** El bote con la mano del saque (solo si el tiro es un saque). */
+export interface ServeDoc {
+  /** altura de suelta, m */
+  r: number;
+  /** momento del golpe, en fases del rebote */
+  p: number;
+}
+
 export interface Doc {
   v: DocVersion;
   shot: ShotDoc;
   venue?: VenueDoc;
+  serve?: ServeDoc;
   view?: ViewDoc;
   /** Tiros guardados. Solo viaja en el JSON y en localStorage. */
   saved?: NamedShot[];

@@ -140,7 +140,7 @@ export const createInspectorPanel = (): PanelView => {
 
   const render = (trajectory: Trajectory): void => {
     // ---- FASE 8: juicio reglamentario y clasificacion ----
-    const a = analyse(trajectory, state.shot.origin, state.serveMode);
+    const a = analyse(trajectory, state.shot.origin, state.serveMode, state.toss);
 
     clearNode(verdict);
     const badges = el('div', { class: 'badge-row' });
@@ -295,7 +295,7 @@ export const createInspectorPanel = (): PanelView => {
     label: 'Rebotes',
     root,
     sync(changed) {
-      if (changed.has('trajectory') || changed.has('serveMode')) {
+      if (changed.has('trajectory') || changed.has('serveMode') || changed.has('toss')) {
         render(state.trajectory);
       }
     },

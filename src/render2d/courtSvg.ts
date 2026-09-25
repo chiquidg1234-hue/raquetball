@@ -18,6 +18,7 @@ import type { BounceIndex } from '../core/solve.js';
 import type { UnfoldedCourt } from '../core/unfold.js';
 import { positionAt, splitByBounce } from '../core/trajectory-utils.js';
 import { length, normalize } from '../core/vec3.js';
+import type { Toss } from '../core/serveToss.js';
 import type { Point2, Projection } from './projections.js';
 import { clear, pointsAttr, setAttrs, svgEl } from './svg.js';
 
@@ -40,6 +41,12 @@ export interface TrajectoryDrawOptions {
   ghosts?: Trajectory[];
   /** Objetivo del problema inverso (fase 10). Solo se dibuja en planta. */
   target?: { x: number; z: number; bounceIndex: BounceIndex } | null;
+  /**
+   * El bote con la mano del saque. Se dibuja aparte, con su propio color,
+   * y su bote NO entra en la numeracion de los botes del tiro. Con el
+   * playhead en negativo, la pelota animada va por aqui.
+   */
+  toss?: Toss | null;
 }
 
 export class CourtView2D {
@@ -318,11 +325,82 @@ export class CourtView2D {
     if (opts.target && this.projection.id === 'plan') {
       this.drawTarget(opts.target);
     }
+    if (opts.toss) this.drawToss(opts.toss);
     if (opts.origin) this.drawOrigin(opts.origin);
     if (opts.aim) this.drawAim(opts.aim);
-    if (trajectory && opts.playhead != null) {
-      this.drawBall(trajectory, opts.playhead);
+    if (opts.playhead != null) {
+      if (opts.toss && opts.playhead < 0) {
+        this.drawBall(opts.toss.path, opts.toss.duration + opts.playhead);
+      } else if (trajectory) {
+        this.drawBall(trajectory, opts.playhead);
+      }
     }
+  }
+
+  /**
+   * El bote de saque: la caida desde la mano, el bote y la subida hasta el
+   * golpe. En violeta y sin numero: no es un bote del tiro. En planta todo
+   * cae en el mismo punto (la pelota sube y baja en vertical), asi que ahi
+   * basta un anillo alrededor del jugador.
+   */
+  private drawToss(toss: Toss): void {
+    const g = svgEl('g', { class: 'toss', 'data-toss': toss.fault ?? 'ok' }, this.gMarkers);
+    const bounce = this.p(toss.bounce.point);
+    const fault = toss.fault !== null;
+    if (this.projection.id === 'plan') {
+      svgEl(
+        'rect',
+        {
+          class: `toss-mark${fault ? ' toss-mark--fault' : ''}`,
+          x: bounce.u - 0.2,
+          y: bounce.v - 0.2,
+          width: 0.4,
+          height: 0.4,
+          rx: 0.05,
+          'data-toss-bounce': '',
+        },
+        g,
+      );
+      return;
+    }
+    svgEl(
+      'polyline',
+      {
+        class: 'toss-line',
+        points: pointsAttr(toss.path.samples.map((sm) => this.p(sm.p))),
+      },
+      g,
+    );
+    const hand = this.p(toss.release);
+    svgEl('circle', { class: 'toss-hand', cx: hand.u, cy: hand.v, r: 0.09 }, g);
+    svgEl(
+      'rect',
+      {
+        class: `toss-mark${fault ? ' toss-mark--fault' : ''}`,
+        x: bounce.u - 0.11,
+        y: bounce.v - 0.11,
+        width: 0.22,
+        height: 0.22,
+        rx: 0.03,
+        'data-toss-bounce': '',
+      },
+      g,
+    );
+    const label = svgEl(
+      'text',
+      {
+        class: `toss-label${fault ? ' toss-label--fault' : ''}`,
+        x: bounce.u + 0.2,
+        y: bounce.v - 0.16,
+        'font-size': 0.2,
+      },
+      g,
+    );
+    label.textContent = fault
+      ? toss.fault === 'double-bounce'
+        ? 'saque: 2 botes, falta'
+        : 'saque: fuera de zona'
+      : 'bote de saque';
   }
 
   /**

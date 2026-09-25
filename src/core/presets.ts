@@ -113,7 +113,11 @@ export const PRESETS: readonly Preset[] = [
       label: `Z serve ${sideLabel(side)}`,
       group: 'saque',
       when: 'Frontal alta cerca de la esquina, lateral, y cruza al rincon opuesto. Obliga a girar el cuerpo.',
-      speed: 42,
+      // Era 42. Con el COR que pasa la prueba de homologacion (0.872) la
+      // pelota sale mas viva y a 42 m/s el saque quedaba al borde del
+      // "largo": legal con contacto a 0.72 m, largo a 0.65. A 39 es legal
+      // con cualquier altura de contacto entre 0.55 y 1.05 m.
+      speed: 39,
       origin: () => serviceSpot(opposite(side)),
       target: (_o) => ({ x: nearWallX(side, 0.75), y: 1.4, z: CENTER_BOX.zMin }),
       expect: ['front', side, 'floor'],

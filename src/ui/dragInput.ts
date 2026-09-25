@@ -73,7 +73,7 @@ const placeFloorBounce = (
 
   const r = solveAim(
     {
-      origin: state.origin,
+      origin: state.shot.origin,
       speed: state.speed,
       model,
       physics: venueSimOptions(state.venue),

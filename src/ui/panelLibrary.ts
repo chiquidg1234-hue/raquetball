@@ -7,7 +7,7 @@
  *   hash de la URL      para compartir (el enlace ES los datos)
  */
 
-import { fromVenueDoc, toDoc, toShotDoc, type NamedShot, type Doc } from '../persist/schema.js';
+import { toShotDoc, type NamedShot, type Doc } from '../persist/schema.js';
 import {
   deleteShot,
   loadSavedShots,
@@ -21,7 +21,7 @@ import type { Play } from '../core/board.js';
 import { clearNode, el } from './dom.js';
 import { copyField, openModal } from './modal.js';
 import type { PanelView } from './panels.js';
-import { applyShotDoc, state, update } from './state.js';
+import { applyDoc, applyShotDoc, currentDoc, state, update } from './state.js';
 
 const formatDate = (t: number): string =>
   new Date(t).toLocaleString(undefined, {
@@ -49,7 +49,7 @@ export const createLibraryPanel = (): PanelView => {
     text: 'Guardar',
   });
   saveButton.addEventListener('click', () => {
-    saved = saveShot(nameInput.value || suggestName(), toShotDoc(state));
+    saved = saveShot(nameInput.value || suggestName(), toShotDoc({ ...state, origin: state.shot.origin }));
     nameInput.value = '';
     renderList();
   });
@@ -96,7 +96,7 @@ export const createLibraryPanel = (): PanelView => {
 
   const share = el('button', { class: 'btn', type: 'button', text: 'Copiar enlace' });
   share.addEventListener('click', () => {
-    const url = buildShareUrl(toDoc(state));
+    const url = buildShareUrl(currentDoc());
     openModal('Compartir este tiro', [
       el('p', {
         class: 'field-hint',
@@ -111,7 +111,7 @@ export const createLibraryPanel = (): PanelView => {
   const exportJson = el('button', { class: 'btn', type: 'button', text: 'Exportar JSON' });
   exportJson.addEventListener('click', () => {
     const doc: Doc = {
-      ...toDoc(state),
+      ...currentDoc(),
       saved,
       plays: state.plays,
     };
@@ -144,9 +144,7 @@ export const createLibraryPanel = (): PanelView => {
         status.textContent = 'No se reconoce el contenido. Debe ser un JSON exportado o un enlace con #s=.';
         return;
       }
-      applyShotDoc(doc.shot);
-      // v1 no trae cancha: se lee con la de referencia, que es con la que se hizo.
-      update({ venue: fromVenueDoc(doc.venue) });
+      applyDoc(doc);
       if (doc.saved?.length) {
         const byId = new Map(saved.map((s) => [s.id, s]));
         for (const s of doc.saved) if (!byId.has(s.id)) byId.set(s.id, s);

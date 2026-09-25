@@ -79,7 +79,7 @@ export const createBoardPanel = (): PanelView => {
       id: newId(),
       name: `Jugada ${state.plays.length + 1}`,
       createdAt: Date.now(),
-      steps: [{ shot: toShotDoc(state), note: '' }],
+      steps: [{ shot: toShotDoc({ ...state, origin: state.shot.origin }), note: '' }],
       board: cloneBoard(state.board),
     };
     persistPlays([play, ...state.plays]);
@@ -95,7 +95,7 @@ export const createBoardPanel = (): PanelView => {
     }
     const updated: Play = {
       ...play,
-      steps: [...play.steps, { shot: toShotDoc(state), note: '' }],
+      steps: [...play.steps, { shot: toShotDoc({ ...state, origin: state.shot.origin }), note: '' }],
       board: cloneBoard(state.board),
     };
     persistPlays(state.plays.map((p) => (p.id === play.id ? updated : p)));

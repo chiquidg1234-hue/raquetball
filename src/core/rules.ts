@@ -18,6 +18,7 @@
  */
 
 import { COURT } from './constants.js';
+import type { Toss } from './serveToss.js';
 import type { Bounce, SurfaceId, Trajectory, Vec3 } from './types.js';
 
 /** Profundidad a la que se mide la altura de paso. Ver `deepHeight`. */
@@ -28,7 +29,11 @@ export type ServeFault =
   | 'short'
   | 'long'
   | 'three-wall'
-  | 'ceiling';
+  | 'ceiling'
+  /** El bote con la mano cae fuera de la zona de saque (IRF 3.8(f)). */
+  | 'toss-outside'
+  /** El golpe llega despues de que la pelota bote dos veces (IRF 3.3). */
+  | 'double-bounce';
 
 export interface ServeJudgement {
   legal: boolean;
@@ -134,13 +139,34 @@ export const judgeReturn = (t: Trajectory): ReturnJudgement => {
 
 // ------------------------------------------------------------------ saque
 
-export const judgeServe = (t: Trajectory, origin: Vec3): ServeJudgement => {
+export const judgeServe = (
+  t: Trajectory,
+  origin: Vec3,
+  toss: Toss | null = null,
+): ServeJudgement => {
   const fault = (f: ServeFault, label: string, detail: string): ServeJudgement => ({
     legal: false,
     fault: f,
     label,
     detail,
   });
+
+  // Antes que el tiro, el bote con la mano: si ese ya es falta, lo que
+  // haga despues la pelota no importa.
+  if (toss?.fault === 'toss-outside') {
+    return fault(
+      'toss-outside',
+      'falta: bote fuera de la zona',
+      `La pelota bota a z=${toss.bounce.point.z.toFixed(2)} m; la zona de saque va de ${COURT.serviceLine.toFixed(2)} a ${COURT.shortLine.toFixed(2)} m (IRF 3.8 f).`,
+    );
+  }
+  if (toss?.fault === 'double-bounce') {
+    return fault(
+      'double-bounce',
+      'falta: botó dos veces',
+      'El golpe llega después de que la pelota vuelva a tocar el piso. Hay que pegarle en el primer rebote (IRF 3.3).',
+    );
+  }
 
   const first = t.bounces[0];
   if (!first || first.surface !== 'front') {
@@ -344,6 +370,7 @@ export const analyse = (
   t: Trajectory,
   origin: Vec3,
   serveMode: boolean,
+  toss: Toss | null = null,
 ): ShotAnalysis => {
   const floors = floorBounces(t);
   const front = t.bounces.find((b) => b.surface === 'front');
@@ -354,7 +381,7 @@ export const analyse = (
     classLabel: CLASS_LABEL[classification],
     classDetail: detail,
     ret: judgeReturn(t),
-    serve: serveMode ? judgeServe(t, origin) : null,
+    serve: serveMode ? judgeServe(t, origin, toss) : null,
     frontImpactHeight: front ? front.point.y : null,
     firstFloor: floors[0] ?? null,
     secondFloor: floors[1] ?? null,
