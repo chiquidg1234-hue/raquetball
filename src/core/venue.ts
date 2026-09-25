@@ -54,7 +54,7 @@ export interface Place {
  * corrigieron respecto al encargo (1875 -> 1866, 2810 -> 2790) segun el INE.
  */
 export const PLACES: Record<Exclude<PlaceId, 'custom'>, Place> = {
-  ref: { id: 'ref', name: 'Nivel del mar (referencia)', altitude: 0, source: 'atmosfera estandar' },
+  ref: { id: 'ref', name: 'Nivel del mar (referencia)', altitude: 0, source: 'atmósfera estándar' },
   scz: { id: 'scz', name: 'Santa Cruz de la Sierra', altitude: 416, source: 'INE' },
   tja: { id: 'tja', name: 'Tarija', altitude: 1866, source: 'INE' },
   cbba: { id: 'cbba', name: 'Cochabamba', altitude: 2558, source: 'INE' },

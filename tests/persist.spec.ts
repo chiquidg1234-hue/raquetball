@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { DOC_VERSION, fromShotDoc, isDoc, toShotDoc } from '../src/persist/schema.js';
+import {
+  DOC_VERSION,
+  fromShotDoc,
+  fromVenueDoc,
+  isDoc,
+  toDoc,
+  toShotDoc,
+  toVenueDoc,
+} from '../src/persist/schema.js';
 import { decodeDoc, encodeDoc } from '../src/persist/share.js';
 import { v3 } from '../src/core/vec3.js';
+import { DEFAULT_VENUE, withBall, withPlace, withWalls } from '../src/core/venue.js';
 
 const sample = {
   origin: v3(2.137, 0.912, 8.421),
@@ -67,5 +76,47 @@ describe('compartir por URL', () => {
     for (const junk of ['', 'no-es-lz-string', 'AAAA', '%%%']) {
       expect(decodeDoc(junk)).toBeNull();
     }
+  });
+});
+
+describe('documento v2: la cancha viaja con el tiro', () => {
+  const venue = {
+    ...withWalls(withBall(withPlace(DEFAULT_VENUE, 'elalto'), 'gearbox-black'), 'glass'),
+    temperatureC: 9,
+    pressureHpa: 628,
+    wallTangential: 0.58,
+  };
+
+  it('la version actual es la 2', () => {
+    expect(DOC_VERSION).toBe(2);
+  });
+
+  it('ida y vuelta conserva la cancha entera', () => {
+    expect(fromVenueDoc(toVenueDoc(venue))).toEqual(venue);
+  });
+
+  it('por URL tambien', () => {
+    const doc = toDoc({ ...sample, venue });
+    const decoded = decodeDoc(encodeDoc(doc))!;
+    expect(decoded.v).toBe(2);
+    expect(fromVenueDoc(decoded.venue)).toEqual(venue);
+    // Con la cancha dentro sigue cabiendo en cualquier chat.
+    expect(encodeDoc(doc).length).toBeLessThan(400);
+  });
+
+  it('un enlace v1 se sigue abriendo, con la cancha de referencia', () => {
+    const v1 = { v: 1, shot: toShotDoc(sample) };
+    expect(isDoc(v1)).toBe(true);
+    const decoded = decodeDoc(encodeDoc(v1 as never))!;
+    expect(fromShotDoc(decoded.shot)!.speed).toBe(62);
+    expect(fromVenueDoc(decoded.venue)).toEqual(DEFAULT_VENUE);
+  });
+
+  it('una cancha con basura se repara, no rompe', () => {
+    const repaired = fromVenueDoc({ p: 'marte', h: 'alto', t: 500, b: 7, w: 'papel' });
+    expect(repaired.place).toBe(DEFAULT_VENUE.place);
+    expect(repaired.temperatureC).toBe(40);
+    expect(repaired.ball).toBe(DEFAULT_VENUE.ball);
+    expect(repaired.walls).toBe(DEFAULT_VENUE.walls);
   });
 });

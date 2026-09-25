@@ -11,13 +11,15 @@ import { isSkip } from './core/contacts.js';
 import { unfoldFirstSideBounce } from './core/unfold.js';
 import { BoardOverlay } from './render2d/overlay.js';
 import { canvasToPng, svgToPng } from './persist/exportPng.js';
-import { DOC_VERSION, toShotDoc } from './persist/schema.js';
+import { fromVenueDoc, toDoc, toVenueDoc } from './persist/schema.js';
 import { readHashDoc, syncHash } from './persist/share.js';
 import {
   loadBoard,
   loadPlays,
+  loadVenue,
   loadViewPrefs,
   storeBoard,
+  storeVenue,
   storeViewPrefs,
 } from './persist/storage.js';
 import { fromShotDoc } from './persist/schema.js';
@@ -45,12 +47,14 @@ import { createSolvePanel } from './ui/panelSolve.js';
 import { createShotPanel } from './ui/panelSliders.js';
 import {
   applyShotDoc,
+  simOptionsFor,
   state,
   subscribe,
   update,
   type AppState,
   type LayoutId,
 } from './ui/state.js';
+import { createVenuePanel } from './ui/panelVenue.js';
 
 const views = new Map<ProjectionId, CourtView2D>();
 const panels: PanelView[] = [];
@@ -176,7 +180,8 @@ const mount2D = (): void => {
 const ghostsForPlay = (): Trajectory[] => {
   const play = state.plays.find((p) => p.id === state.currentPlayId);
   if (!play || state.playStep <= 0) return [];
-  const key = `${play.id}:${state.playStep}`;
+  // El aire tambien es parte de la clave: cambiar de ciudad cambia los fantasmas.
+  const key = `${play.id}:${state.playStep}:${JSON.stringify(toVenueDoc(state.venue))}`;
   if (ghostCache.key === key) return ghostCache.list;
 
   const list: Trajectory[] = [];
@@ -190,7 +195,7 @@ const ghostsForPlay = (): Trajectory[] => {
           direction: fromAzimuthElevation(parsed.azimuthDeg, parsed.elevationDeg),
           speed: parsed.speed,
         },
-        { model: parsed.model },
+        simOptionsFor(parsed.model, state.venue),
       ),
     );
   }
@@ -281,6 +286,7 @@ const syncLayout = (): void => {
 const mountPanel = (): void => {
   panels.push(
     createShotPanel(),
+    createVenuePanel(),
     createPresetPanel(),
     createSolvePanel(),
     createBoardPanel(),
@@ -682,9 +688,9 @@ const mountKeyboard = (): void => {
 
 // ------------------------------------------------------------- arranque
 
-/** El hash siempre refleja el tiro actual: copiar la URL ya comparte. */
+/** El hash siempre refleja el tiro actual y su cancha: copiar la URL ya comparte. */
 const pushHash = (): void => {
-  syncHash({ v: DOC_VERSION, shot: toShotDoc(state) });
+  syncHash(toDoc(state));
 };
 
 const restoreFromUrlAndStorage = (): void => {
@@ -699,9 +705,15 @@ const restoreFromUrlAndStorage = (): void => {
   if (plays.length) update({ plays });
   const board = loadBoard();
   if (board) update({ board: cloneBoard(board) });
+  const venue = loadVenue();
+  if (venue) update({ venue });
 
   const doc = readHashDoc();
-  if (doc) applyShotDoc(doc.shot);
+  if (doc) {
+    applyShotDoc(doc.shot);
+    // Un enlace v1 no trae cancha: se hizo con el aire de referencia.
+    update({ venue: fromVenueDoc(doc.venue) });
+  }
 };
 
 const boot = (): void => {
@@ -721,7 +733,8 @@ const boot = (): void => {
       syncLayout();
       scene3d?.resize();
     }
-    if (changed.has('shot') || changed.has('model')) pushHash();
+    if (changed.has('shot') || changed.has('model') || changed.has('venue')) pushHash();
+    if (changed.has('venue')) storeVenue(state.venue);
     if (changed.has('layout') || changed.has('mirror') || changed.has('serveMode')) {
       storeViewPrefs({
         l: state.layout,

@@ -6,7 +6,19 @@
  * comprimido dentro de una URL, y cada byte cuenta.
  */
 
-export const DOC_VERSION = 1 as const;
+import {
+  DEFAULT_VENUE,
+  normalizeVenue,
+  type Venue,
+} from '../core/venue.js';
+
+/**
+ * v2 anade el sitio de juego (`venue`). Los documentos v1 se siguen
+ * aceptando: no traen sitio y se leen con el de referencia (nivel del mar,
+ * 20 C), que es el aire con el que se hicieron.
+ */
+export const DOC_VERSION = 2 as const;
+export type DocVersion = 1 | typeof DOC_VERSION;
 
 export interface ShotDoc {
   /** origen [x, y, z] */
@@ -37,9 +49,36 @@ export interface NamedShot {
   shot: ShotDoc;
 }
 
+/** El sitio de juego, con claves cortas porque viaja en la URL. */
+export interface VenueDoc {
+  /** lugar */
+  p: string;
+  /** altitud, m */
+  h: number;
+  /** temperatura, C */
+  t: number;
+  /** presion medida, hPa (si no hay, la estandar) */
+  hp?: number;
+  /** pelota */
+  b: string;
+  /** rebote de homologacion, in */
+  r: number;
+  /** sensibilidad del COR, por C */
+  ct: number;
+  /** paredes y piso */
+  w: string;
+  f: string;
+  /** calibracion: factor de COR y restitucion tangencial */
+  wc: number;
+  wt: number;
+  fc: number;
+  ft: number;
+}
+
 export interface Doc {
-  v: typeof DOC_VERSION;
+  v: DocVersion;
   shot: ShotDoc;
+  venue?: VenueDoc;
   view?: ViewDoc;
   /** Tiros guardados. Solo viaja en el JSON y en localStorage. */
   saved?: NamedShot[];
@@ -92,8 +131,54 @@ export const fromShotDoc = (
   };
 };
 
+export const toVenueDoc = (v: Venue): VenueDoc => {
+  const doc: VenueDoc = {
+    p: v.place,
+    h: Math.round(v.altitude),
+    t: r3(v.temperatureC),
+    b: v.ball,
+    r: r3(v.reboundIn),
+    ct: r3(v.corPerDegree * 1000) / 1000,
+    w: v.walls,
+    f: v.floor,
+    wc: r3(v.wallCorFactor),
+    wt: r3(v.wallTangential),
+    fc: r3(v.floorCorFactor),
+    ft: r3(v.floorTangential),
+  };
+  if (v.pressureHpa != null) doc.hp = r3(v.pressureHpa);
+  return doc;
+};
+
+/** Valida y sanea. Un documento sin sitio (v1) da el de referencia. */
+export const fromVenueDoc = (raw: unknown): Venue => {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_VENUE };
+  const d = raw as Partial<VenueDoc>;
+  return normalizeVenue({
+    place: d.p,
+    altitude: d.h,
+    temperatureC: d.t,
+    pressureHpa: d.hp,
+    ball: d.b,
+    reboundIn: d.r,
+    corPerDegree: d.ct,
+    walls: d.w,
+    floor: d.f,
+    wallCorFactor: d.wc,
+    wallTangential: d.wt,
+    floorCorFactor: d.fc,
+    floorTangential: d.ft,
+  });
+};
+
+export const toDoc = (s: Parameters<typeof toShotDoc>[0] & { venue: Venue }): Doc => ({
+  v: DOC_VERSION,
+  shot: toShotDoc(s),
+  venue: toVenueDoc(s.venue),
+});
+
 export const isDoc = (raw: unknown): raw is Doc =>
   !!raw &&
   typeof raw === 'object' &&
-  (raw as Doc).v === DOC_VERSION &&
+  ((raw as Doc).v === 1 || (raw as Doc).v === DOC_VERSION) &&
   fromShotDoc((raw as Doc).shot) !== null;

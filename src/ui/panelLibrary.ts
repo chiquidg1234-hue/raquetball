@@ -7,7 +7,7 @@
  *   hash de la URL      para compartir (el enlace ES los datos)
  */
 
-import { toShotDoc, type NamedShot, type Doc, DOC_VERSION } from '../persist/schema.js';
+import { fromVenueDoc, toDoc, toShotDoc, type NamedShot, type Doc } from '../persist/schema.js';
 import {
   deleteShot,
   loadSavedShots,
@@ -96,7 +96,7 @@ export const createLibraryPanel = (): PanelView => {
 
   const share = el('button', { class: 'btn', type: 'button', text: 'Copiar enlace' });
   share.addEventListener('click', () => {
-    const url = buildShareUrl({ v: DOC_VERSION, shot: toShotDoc(state) });
+    const url = buildShareUrl(toDoc(state));
     openModal('Compartir este tiro', [
       el('p', {
         class: 'field-hint',
@@ -111,8 +111,7 @@ export const createLibraryPanel = (): PanelView => {
   const exportJson = el('button', { class: 'btn', type: 'button', text: 'Exportar JSON' });
   exportJson.addEventListener('click', () => {
     const doc: Doc = {
-      v: DOC_VERSION,
-      shot: toShotDoc(state),
+      ...toDoc(state),
       saved,
       plays: state.plays,
     };
@@ -146,6 +145,8 @@ export const createLibraryPanel = (): PanelView => {
         return;
       }
       applyShotDoc(doc.shot);
+      // v1 no trae cancha: se lee con la de referencia, que es con la que se hizo.
+      update({ venue: fromVenueDoc(doc.venue) });
       if (doc.saved?.length) {
         const byId = new Map(saved.map((s) => [s.id, s]));
         for (const s of doc.saved) if (!byId.has(s.id)) byId.set(s.id, s);

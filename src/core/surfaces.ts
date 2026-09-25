@@ -36,15 +36,15 @@ export const WALL_MATERIALS: Record<WallMaterialId, SurfaceMaterial<WallMaterial
     id: 'panel',
     name: 'Paneles prefabricados ("placa")',
     detail:
-      'Melamina sobre aglomerado denso, tipo Fiberesin. La patente dice que rebota igual que el hormigon.',
+      'Melamina sobre aglomerado denso, tipo Fiberesin. Su patente dice que rebota igual que el hormigón.',
     corFactor: 1,
     tangential: BALL.tangentialRestitution,
   },
   plaster: {
     id: 'plaster',
-    name: 'Revoque sobre ladrillo u hormigon',
+    name: 'Revoque sobre ladrillo u hormigón',
     detail:
-      'La construccion clasica. "Superficie lisa y uniforme, rebote consistente". Sin medida publicada.',
+      'La construcción clásica: "superficie lisa y uniforme, rebote consistente". Sin medida publicada.',
     corFactor: 1,
     tangential: BALL.tangentialRestitution,
   },
@@ -52,7 +52,7 @@ export const WALL_MATERIALS: Record<WallMaterialId, SurfaceMaterial<WallMaterial
     id: 'glass',
     name: 'Cristal templado (cancha estadio)',
     detail:
-      'En padel y squash rebota algo mas rapido; no hay numero para racquetball. Calibralo.',
+      'En pádel y squash rebota algo más rápido; no hay número para racquetball. Calíbralo.',
     corFactor: 1,
     tangential: BALL.tangentialRestitution,
   },
@@ -62,7 +62,7 @@ export const FLOOR_MATERIALS: Record<FloorMaterialId, SurfaceMaterial<FloorMater
   wood: {
     id: 'wood',
     name: 'Duela de madera (arce)',
-    detail: 'El piso reglamentario de los sistemas de cancha. Sin medida publicada de rebote.',
+    detail: 'El piso de los sistemas de cancha. Sin medida publicada de rebote.',
     corFactor: 1,
     tangential: BALL.tangentialRestitution,
   },

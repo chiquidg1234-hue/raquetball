@@ -25,6 +25,7 @@ import { pointerToViewBox } from '../render2d/svg.js';
 import { pickCourt } from '../render3d/pickers.js';
 import type { Scene3D } from '../render3d/scene.js';
 import { solveAim, type BounceIndex } from '../core/solve.js';
+import { venueSimOptions } from '../core/venue.js';
 import { aimAt, state, update } from './state.js';
 import { showToast } from './toast.js';
 
@@ -75,6 +76,7 @@ const placeFloorBounce = (
       origin: state.origin,
       speed: state.speed,
       model,
+      physics: venueSimOptions(state.venue),
       searchSpeed: state.solveSearchSpeed,
       // Partir del tiro actual, y de todas las soluciones quedarse con la
       // que menos mueve los botes anteriores: se mueve lo que se agarra.

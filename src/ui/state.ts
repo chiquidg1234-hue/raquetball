@@ -22,6 +22,7 @@ import type { BoardTool } from '../render2d/overlay.js';
 import { presetById, resolvePreset } from '../core/presets.js';
 import type { Alternative, BounceIndex } from '../core/solve.js';
 import { fromShotDoc, type ShotDoc } from '../persist/schema.js';
+import { DEFAULT_VENUE, venueSimOptions, type Venue } from '../core/venue.js';
 import { fromAzimuthElevation, normalize, sub, v3 } from '../core/vec3.js';
 
 export type LayoutId = 'split' | '3d' | 'plan' | 'front' | 'side';
@@ -36,6 +37,12 @@ export interface AppState {
   model: PhysicsModel;
   /** Preset cargado, si el tiro no se ha tocado despues. */
   presetId: string | null;
+  /**
+   * Donde se juega: altitud, temperatura, pelota, paredes y piso. No es el
+   * tiro, pero cambia por donde va la pelota: por eso tambien obliga a
+   * recalcular la trayectoria.
+   */
+  venue: Venue;
 
   // --- derivados ---
   shot: Shot;
@@ -89,6 +96,7 @@ const SHOT_KEYS: readonly (keyof AppState)[] = [
   'elevationDeg',
   'speed',
   'model',
+  'venue',
 ];
 
 export const deriveShot = (s: {
@@ -102,7 +110,14 @@ export const deriveShot = (s: {
   speed: s.speed,
 });
 
-export const simOptionsFor = (model: PhysicsModel): SimOptions => ({ model });
+/**
+ * Opciones del motor para el estado actual. La vista, el solver y los
+ * fantasmas de la pizarra salen de aqui: todos con el MISMO aire.
+ */
+export const simOptionsFor = (model: PhysicsModel, venue: Venue): SimOptions => ({
+  ...venueSimOptions(venue),
+  model,
+});
 
 /**
  * Tiro con el que abre la app: un pase por la izquierda que bota a 9 m,
@@ -127,9 +142,10 @@ export const state: AppState = {
   speed: SPEED.default,
   model: 'ballistic',
   presetId: null,
+  venue: DEFAULT_VENUE,
 
   shot: initialShot,
-  trajectory: simulate(initialShot, { model: 'ballistic' }),
+  trajectory: simulate(initialShot, simOptionsFor('ballistic', DEFAULT_VENUE)),
 
   playhead: 0,
   playing: false,
@@ -187,7 +203,7 @@ export const update = (patch: Partial<AppState>): void => {
   const shotChanged = SHOT_KEYS.some((k) => changed.has(k));
   if (shotChanged) {
     state.shot = deriveShot(state);
-    state.trajectory = simulate(state.shot, simOptionsFor(state.model));
+    state.trajectory = simulate(state.shot, simOptionsFor(state.model, state.venue));
     changed.add('shot');
     changed.add('trajectory');
     if (state.playhead > state.trajectory.totalTime) {

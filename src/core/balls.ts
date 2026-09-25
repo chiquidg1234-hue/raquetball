@@ -40,7 +40,7 @@ export const BALLS: Record<BallId, BallSpec> = {
     claim: 'Speed "Fast and Smooth", bounce "Soft and Consistent"',
     reboundIn: 69,
     reboundBasis:
-      'estimacion: la mas blanda de las tres segun su ficha ("soft"), por debajo del centro del rango',
+      'estimación: la más blanda de las tres según su ficha ("soft"), por debajo del centro del rango',
     source: 'https://gearboxsports.com/products/racquetball-3-ball-pack-sleek-black',
   },
   'formulaflow-blue': {
@@ -50,7 +50,7 @@ export const BALLS: Record<BallId, BallSpec> = {
     color: '#2f6fe0',
     claim: '"Balanced Speed: a controlled, lively response"',
     reboundIn: 70,
-    reboundBasis: 'estimacion: "balanced", el centro del rango legal',
+    reboundBasis: 'estimación: "balanced", el centro del rango legal',
     source: 'https://formulaflow.com/products/racquetballs',
   },
   'gearbox-blue': {
@@ -61,7 +61,7 @@ export const BALLS: Record<BallId, BallSpec> = {
     claim: 'Speed "Gearbox\'s Fastest Ball", bounce "Lively and Consistent"',
     reboundIn: 71,
     reboundBasis:
-      'estimacion: la mas rapida de Gearbox segun su ficha ("fastest"), por encima del centro',
+      'estimación: la más rápida de Gearbox según su ficha ("fastest"), por encima del centro',
     source: 'https://gearboxsports.com/products/racquetball-3-ball-pack-electric-blue',
   },
 };

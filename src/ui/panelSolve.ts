@@ -14,6 +14,7 @@ import {
   type BounceIndex,
   type SolveResult,
 } from '../core/solve.js';
+import { venueSimOptions } from '../core/venue.js';
 import { clearNode, el, slider, type SliderHandle } from './dom.js';
 import type { PanelView } from './panels.js';
 import { state, update } from './state.js';
@@ -183,6 +184,7 @@ export const createSolvePanel = (): PanelView => {
         origin: state.origin,
         speed: state.speed,
         model: state.model,
+        physics: venueSimOptions(state.venue),
         searchSpeed: state.solveSearchSpeed,
         // Se piden alternativas: tambien aqui hay varias formas de llegar.
         seed: [state.azimuthDeg, state.elevationDeg],

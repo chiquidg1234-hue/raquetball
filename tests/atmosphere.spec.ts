@@ -112,7 +112,7 @@ describe('COR desde la prueba de homologacion', () => {
     expect(BALLS['formulaflow-blue'].reboundIn).toBeLessThan(BALLS['gearbox-blue'].reboundIn);
     for (const id of BALL_IDS) {
       // Ningun fabricante publica medidas: tiene que decir que es estimacion.
-      expect(BALLS[id].reboundBasis).toMatch(/^estimacion/);
+      expect(BALLS[id].reboundBasis).toMatch(/^estimación/);
     }
   });
 

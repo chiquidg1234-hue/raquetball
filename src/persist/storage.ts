@@ -8,12 +8,14 @@
  */
 
 import type { Board, Play } from '../core/board.js';
-import type { NamedShot, ShotDoc, ViewDoc } from './schema.js';
+import type { Venue } from '../core/venue.js';
+import { fromVenueDoc, toVenueDoc, type NamedShot, type ShotDoc, type VenueDoc, type ViewDoc } from './schema.js';
 
 const KEY_SHOTS = 'rtl.v1.shots';
 const KEY_VIEW = 'rtl.v1.view';
 const KEY_PLAYS = 'rtl.v1.plays';
 const KEY_BOARD = 'rtl.v1.board';
+const KEY_VENUE = 'rtl.v2.venue';
 
 const read = <T>(key: string, fallback: T): T => {
   try {
@@ -69,6 +71,13 @@ export const storePlays = (list: Play[]): boolean => write(KEY_PLAYS, list);
 
 export const loadBoard = (): Board | null => read<Board | null>(KEY_BOARD, null);
 export const storeBoard = (board: Board): boolean => write(KEY_BOARD, board);
+
+/** El sitio de juego de la ultima sesion. null si nunca se toco. */
+export const loadVenue = (): Venue | null => {
+  const raw = read<VenueDoc | null>(KEY_VENUE, null);
+  return raw ? fromVenueDoc(raw) : null;
+};
+export const storeVenue = (venue: Venue): boolean => write(KEY_VENUE, toVenueDoc(venue));
 
 export const loadViewPrefs = (): ViewDoc => read<ViewDoc>(KEY_VIEW, {});
 export const storeViewPrefs = (view: ViewDoc): boolean => write(KEY_VIEW, view);
