@@ -57,6 +57,7 @@ import {
   type LayoutId,
 } from './ui/state.js';
 import { createVenuePanel } from './ui/panelVenue.js';
+import { strokeAdvice, strokeGeometry, type Stroke } from './core/stroke.js';
 
 const views = new Map<ProjectionId, CourtView2D>();
 const panels: PanelView[] = [];
@@ -243,6 +244,93 @@ const mount3D = (): void => {
     });
     if (preset.id === 'behind') b.classList.add('btn--active');
     host.appendChild(b);
+  }
+
+  // Camara "Golpe": de cerca, sobre la mano y la raqueta del tiro actual.
+  const close = el('button', {
+    class: 'btn',
+    type: 'button',
+    'data-camera': 'contact',
+    text: 'Golpe',
+    title: 'Ver de cerca la mano, la raqueta y los pies',
+  });
+  close.addEventListener('click', () => {
+    if (!state.racquetStroke) update({ racquetStroke: 'forehand' });
+    const g = strokeGeometry(
+      state.shot.origin,
+      state.shot.direction,
+      state.racquetStroke ?? 'forehand',
+      state.handedness,
+    );
+    scene3d?.frameContact(state.shot.origin, state.shot.direction, g.handleDir);
+    for (const other of host.querySelectorAll('[data-camera]')) {
+      other.classList.toggle('btn--active', other === close);
+    }
+  });
+  host.appendChild(close);
+
+  mountRacquetBar();
+};
+
+// ------------------------------------------------------ mano y raqueta
+
+/**
+ * Conmutador derecha / reves / sin raqueta y diestro / zurdo, y un rotulo
+ * con lo que dicen las fuentes del punto de contacto.
+ */
+const mountRacquetBar = (): void => {
+  const host = mustGet('viewport-3d');
+  const bar = el('div', { class: 'racquet-bar', id: 'racquet-bar' });
+  const strokes: [Stroke | null, string][] = [
+    ['forehand', 'Derecha'],
+    ['backhand', 'Revés'],
+    [null, 'Sin raqueta'],
+  ];
+  for (const [stroke, label] of strokes) {
+    const b = el('button', {
+      class: 'btn',
+      type: 'button',
+      'data-stroke': stroke ?? 'none',
+      text: label,
+    });
+    b.addEventListener('click', () => update({ racquetStroke: stroke }));
+    bar.appendChild(b);
+  }
+  bar.appendChild(el('span', { class: 'racquet-sep' }));
+  for (const [hand, label] of [
+    ['right', 'Diestro'],
+    ['left', 'Zurdo'],
+  ] as const) {
+    const b = el('button', { class: 'btn', type: 'button', 'data-hand': hand, text: label });
+    b.addEventListener('click', () => update({ handedness: hand }));
+    bar.appendChild(b);
+  }
+  const caption = el('div', { class: 'racquet-caption', id: 'racquet-caption' });
+  host.append(bar, caption);
+};
+
+const syncRacquet = (): void => {
+  if (scene3d) {
+    scene3d.racquet.setPose(
+      state.shot.origin,
+      state.shot.direction,
+      state.racquetStroke,
+      state.handedness,
+    );
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('[data-stroke]')) {
+    b.classList.toggle('btn--active', b.dataset.stroke === (state.racquetStroke ?? 'none'));
+  }
+  for (const b of document.querySelectorAll<HTMLElement>('[data-hand]')) {
+    b.classList.toggle('btn--active', b.dataset.hand === state.handedness);
+    b.hidden = !state.racquetStroke;
+  }
+  const caption = document.getElementById('racquet-caption');
+  if (caption) {
+    caption.hidden = !state.racquetStroke;
+    if (state.racquetStroke) {
+      caption.textContent = `${strokeAdvice(state.racquetStroke)} Pelota a ${state.shot.origin.y.toFixed(2)} m del piso. Pies: posición aproximada.`;
+    }
   }
 };
 
@@ -617,6 +705,14 @@ const redraw = (changed?: ReadonlySet<string>): void => {
       scene3d.trajectory.setGhosts(ghosts);
     }
     if (!changed || changed.has('toss')) scene3d.trajectory.setToss(state.toss);
+    if (
+      !changed ||
+      changed.has('shot') ||
+      changed.has('racquetStroke') ||
+      changed.has('handedness')
+    ) {
+      syncRacquet();
+    }
     if (!changed || changed.has('aim')) scene3d.trajectory.setAim(state.aim);
     scene3d.trajectory.setPlayhead(state.playhead);
     scene3d.invalidate();
@@ -708,6 +804,10 @@ const restoreFromUrlAndStorage = (): void => {
   if (prefs.l) update({ layout: prefs.l as LayoutId });
   if (prefs.mi) update({ mirror: true });
   if (prefs.sv) update({ serveMode: true });
+  if (prefs.rk) {
+    update({ racquetStroke: prefs.rk === 'b' ? 'backhand' : prefs.rk === 'n' ? null : 'forehand' });
+  }
+  if (prefs.hd) update({ handedness: prefs.hd === 'l' ? 'left' : 'right' });
 
   const plays = loadPlays();
   if (plays.length) update({ plays });
@@ -747,11 +847,19 @@ const boot = (): void => {
       pushHash();
     }
     if (changed.has('venue')) storeVenue(state.venue);
-    if (changed.has('layout') || changed.has('mirror') || changed.has('serveMode')) {
+    if (
+      changed.has('layout') ||
+      changed.has('mirror') ||
+      changed.has('serveMode') ||
+      changed.has('racquetStroke') ||
+      changed.has('handedness')
+    ) {
       storeViewPrefs({
         l: state.layout,
         mi: state.mirror ? 1 : 0,
         sv: state.serveMode ? 1 : 0,
+        rk: state.racquetStroke === 'backhand' ? 'b' : state.racquetStroke ? 'f' : 'n',
+        hd: state.handedness === 'left' ? 'l' : 'r',
       });
     }
     redraw(changed as ReadonlySet<string>);

@@ -1645,3 +1645,45 @@ a.btn {
 .toss-label--fault {
   fill: var(--danger);
 }
+
+/* ----------------------------------------------------- mano y raqueta 3D */
+
+.racquet-bar {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  align-items: center;
+  max-width: calc(100% - 12px);
+}
+.racquet-bar .btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  background: rgba(19, 25, 32, 0.86);
+  backdrop-filter: blur(6px);
+}
+.racquet-bar .btn--active {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.racquet-sep {
+  width: 6px;
+}
+.racquet-caption {
+  position: absolute;
+  left: 6px;
+  bottom: 36px;
+  z-index: 3;
+  max-width: min(420px, calc(100% - 12px));
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(9, 13, 19, 0.78);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
+}

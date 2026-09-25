@@ -24,6 +24,7 @@ import type { Alternative, BounceIndex } from '../core/solve.js';
 import { fromShotDoc, fromVenueDoc, toDoc, type Doc, type ShotDoc } from '../persist/schema.js';
 import { DEFAULT_VENUE, venueSimOptions, type Venue } from '../core/venue.js';
 import { TOSS_DEFAULTS, simulateToss, type Toss, type TossParams } from '../core/serveToss.js';
+import type { Handedness, Stroke } from '../core/stroke.js';
 import { fromAzimuthElevation, normalize, sub, v3 } from '../core/vec3.js';
 
 export type LayoutId = 'split' | '3d' | 'plan' | 'front' | 'side';
@@ -65,6 +66,10 @@ export interface AppState {
    * la altura de contacto del tiro sale de aqui, no del slider.
    */
   toss: Toss | null;
+  /** Mano y raqueta en el 3D: que golpe se ensena. null = ocultas. */
+  racquetStroke: Stroke | null;
+  /** Diestro o zurdo: el espejo de todo el gesto. */
+  handedness: Handedness;
 
   // --- problema inverso (fase 10) ---
   solveTarget: { x: number; z: number; bounceIndex: BounceIndex } | null;
@@ -185,6 +190,8 @@ export const state: AppState = {
   serveMode: false,
   serveToss: { ...TOSS_DEFAULTS },
   toss: null,
+  racquetStroke: 'forehand',
+  handedness: 'right',
 
   board: emptyBoard(),
   tool: 'select',

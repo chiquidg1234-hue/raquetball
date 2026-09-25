@@ -13,6 +13,8 @@ import { COURT } from '../core/constants.js';
 import { buildCourt, type CourtMeshes } from './courtMesh.js';
 import { PALETTE } from './palette.js';
 import { TrajectoryLayer } from './trajectoryMesh.js';
+import { RacquetLayer } from './racquet.js';
+import type { Vec3 } from '../core/types.js';
 
 const W = COURT.width;
 const L = COURT.length;
@@ -60,6 +62,7 @@ export class Scene3D {
   readonly controls: OrbitControls;
   readonly court: CourtMeshes;
   readonly trajectory = new TrajectoryLayer();
+  readonly racquet = new RacquetLayer();
 
   private readonly canvas: HTMLCanvasElement;
   private readonly resizeObserver: ResizeObserver;
@@ -93,6 +96,7 @@ export class Scene3D {
     this.court = buildCourt();
     this.scene.add(this.court.group);
     this.scene.add(this.trajectory.group);
+    this.scene.add(this.racquet.group);
 
     // Materiales basicos: el color del tubo es el dato, no hay que
     // dejar que una luz lo lave. Una ambiental basta para las esferas.
@@ -111,6 +115,28 @@ export class Scene3D {
     if (!preset) return;
     this.camera.position.set(...preset.position);
     this.controls.target.set(...preset.target);
+    this.controls.update();
+    this.needsRender = true;
+  }
+
+  /**
+   * Camara "Golpe": de cerca, detras de la pelota y hacia el lado contrario
+   * al cuerpo, para ver a la vez el cordaje, la mano y los pies.
+   */
+  frameContact(contact: Vec3, direction: Vec3, handleDir: Vec3): void {
+    const flatLen = Math.hypot(direction.x, direction.z) || 1;
+    const fx = direction.x / flatLen;
+    const fz = direction.z / flatLen;
+    this.camera.position.set(
+      contact.x - fx * 1.7 - handleDir.x * 1.2,
+      contact.y + 1.05,
+      contact.z - fz * 1.7 - handleDir.z * 1.2,
+    );
+    this.controls.target.set(
+      contact.x + handleDir.x * 0.3,
+      Math.max(0.2, contact.y - 0.25),
+      contact.z + handleDir.z * 0.3,
+    );
     this.controls.update();
     this.needsRender = true;
   }
@@ -141,6 +167,7 @@ export class Scene3D {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.trajectory.dispose();
+    this.racquet.dispose();
     this.renderer.dispose();
   }
 }

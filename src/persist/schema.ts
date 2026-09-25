@@ -40,6 +40,10 @@ export interface ViewDoc {
   mi?: 1 | 0;
   /** modo saque */
   sv?: 1 | 0;
+  /** raqueta en el 3D: derecha, reves o ninguna */
+  rk?: 'f' | 'b' | 'n';
+  /** diestro o zurdo */
+  hd?: 'r' | 'l';
 }
 
 export interface NamedShot {
