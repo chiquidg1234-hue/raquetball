@@ -16,6 +16,7 @@ import {
   airDensity,
   corFromDropTest,
   dragConstant,
+  dropImpactSpeed,
 } from './atmosphere.js';
 import type { SurfaceId } from './types.js';
 
@@ -96,6 +97,49 @@ export const BALL = {
    */
   tangentialRestitution: 0.65,
 } as const;
+
+/**
+ * El COR BAJA CON LA VELOCIDAD DEL IMPACTO. Toda pelota hueca de goma que se
+ * ha medido lo hace: a mas velocidad se aplasta mas, la pared se dobla
+ * hacia dentro y pierde mas energia (Cross, "Impact behavior of hollow
+ * balls"; Haake, Carre y Goodwill 2003). La prueba de homologacion mide a
+ * 6.9 m/s, y en la frontal se llega a 40-60.
+ *
+ * De racquetball NO hay medidas a velocidad de juego (INVESTIGACION.md,
+ * seccion 11). Se toma la pendiente de las pelotas analogas medidas contra
+ * pared rigida: squash 0.0076 por m/s entre 13 y 29 m/s (ISJOS v13), tenis
+ * 0.009 por m/s entre 13 y 36 m/s. Con 0.008 sobre el 0.872 de la
+ * pelota queda en un 0.92 % menos por cada m/s de velocidad NORMAL por
+ * encima de la de la prueba. Por encima de 40 m/s no hay medidas de nada
+ * parecido: se congela ahi (0.606), en vez de extrapolar una recta que a
+ * 100 m/s daria cero.
+ */
+export const COR_SPEED = {
+  /** Velocidad normal a la que se mide el COR de la prueba (100 in, con aire). */
+  reference: dropImpactSpeed(
+    BALL_TEST.dropHeight,
+    dragConstant(airDensity(BALL_TEST_AIR), BALL_SHAPE),
+  ),
+  /** Fraccion del COR que se pierde por cada m/s por encima de la referencia. */
+  lossPerMs: 0.0092,
+  /** Ultima velocidad con datos analogos: por encima, se congela. */
+  frozenAbove: 40,
+} as const;
+
+/**
+ * COR efectivo para un impacto con velocidad normal `vn`: el de la
+ * superficie hasta la velocidad de la prueba y, por encima, cada m/s le
+ * quita `lossPerMs` de si mismo. Multiplicativo para que una superficie
+ * muerta (COR 0.2) no pase a negativo.
+ */
+export const corAtSpeed = (
+  cor: number,
+  vn: number,
+  lossPerMs: number = COR_SPEED.lossPerMs,
+): number => {
+  const over = Math.max(0, Math.min(Math.abs(vn), COR_SPEED.frozenAbove) - COR_SPEED.reference);
+  return cor * Math.max(0.05, 1 - lossPerMs * over);
+};
 
 /**
  * Densidad del aire de referencia: nivel del mar y 20 C con la atmosfera

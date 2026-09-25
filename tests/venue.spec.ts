@@ -4,6 +4,7 @@ import { BALL, DRAG_K } from '../src/core/constants.js';
 import { floorBounces } from '../src/core/contacts.js';
 import { simulate } from '../src/core/engine.js';
 import { solveAim } from '../src/core/solve.js';
+import { SPIN } from '../src/core/spin.js';
 import { FLOOR_MATERIALS, WALL_MATERIALS } from '../src/core/surfaces.js';
 import type { Trajectory } from '../src/core/types.js';
 import {
@@ -69,12 +70,17 @@ describe('el mismo tiro en Santa Cruz y en El Alto (test obligatorio)', () => {
     expect(ratio).toBeLessThan(0.98);
   });
 
-  it('el primer bote llega mucho mas vivo y mas cerca de la frontal', () => {
+  it('el primer bote llega mas vivo y mas cerca de la frontal', () => {
     const b1Low = floorBounces(low)[0]!;
     const b1High = floorBounces(high)[0]!;
-    // Santa Cruz: 25.0 m/s a 3.9 m de la frontal. El Alto: 29.6 m/s a 1.5 m.
-    expect(b1High.incomingSpeed / b1Low.incomingSpeed).toBeGreaterThan(1.1);
-    expect(b1Low.point.z - b1High.point.z).toBeGreaterThan(1.5);
+    // Con el COR constante (antes) salia de la frontal a 41 m/s y el bote
+    // caia a 3.9 m (Santa Cruz) y 1.5 m (El Alto). Con el COR que baja con
+    // la velocidad del impacto (constants.ts, COR_SPEED) sale a 28.7 y 30.4
+    // m/s, pasa por la trasera, y el 1.er bote es de 16.8 m/s a 9.9 m en
+    // Santa Cruz y de 18.6 m/s a 8.6 m en El Alto. La diferencia sigue
+    // siendo la misma: en El Alto llega mas vivo y antes.
+    expect(b1High.incomingSpeed / b1Low.incomingSpeed).toBeGreaterThan(1.08);
+    expect(b1Low.point.z - b1High.point.z).toBeGreaterThan(1.0);
   });
 
   it('la k de El Alto es un 37 % menor que la de Santa Cruz', () => {
@@ -139,25 +145,33 @@ describe('sitio de juego', () => {
     expect(blue.surfaceRestitution!.front!).toBeGreaterThan(black.surfaceRestitution!.front!);
   });
 
-  it('los materiales arrancan iguales: no hay medida publicada (INVESTIGACION 2)', () => {
+  it('los materiales arrancan iguales: no hay medida publicada (INVESTIGACION 2 y 7)', () => {
+    // Antes cada material traia una "restitucion tangencial" de 0.65 sin
+    // fuente. Ahora traen la friccion mu, que es lo que decide el efecto, y
+    // es la misma para todos: la unica medida es la de Illouz 2014.
     for (const m of [...Object.values(WALL_MATERIALS), ...Object.values(FLOOR_MATERIALS)]) {
       expect(m.corFactor).toBe(1);
-      expect(m.tangential).toBe(BALL.tangentialRestitution);
+      expect(m.friction).toBe(SPIN.friction);
     }
   });
 
   it('cambiar de material descarta la calibracion anterior', () => {
-    const tuned = { ...DEFAULT_VENUE, wallCorFactor: 1.05, floorTangential: 0.5 };
+    const tuned = { ...DEFAULT_VENUE, wallCorFactor: 1.05, floorFriction: 0.5 };
     expect(withWalls(tuned, 'glass').wallCorFactor).toBe(1);
-    expect(withFloor(tuned, 'concrete').floorTangential).toBe(BALL.tangentialRestitution);
+    expect(withFloor(tuned, 'concrete').floorFriction).toBe(SPIN.friction);
   });
 
   it('calibrar el piso cambia solo el piso', () => {
-    const opts = venueSimOptions({ ...DEFAULT_VENUE, floorCorFactor: 0.9, floorTangential: 0.5 });
+    const opts = venueSimOptions({ ...DEFAULT_VENUE, floorCorFactor: 0.9, floorFriction: 0.5 });
     expect(opts.surfaceRestitution!.floor!).toBeCloseTo(BALL.restitution * 0.9, 12);
     expect(opts.surfaceRestitution!.front!).toBeCloseTo(BALL.restitution, 12);
-    expect(opts.surfaceTangential!.floor).toBe(0.5);
-    expect(opts.surfaceTangential!.left).toBe(BALL.tangentialRestitution);
+    expect(opts.surfaceFriction!.floor).toBe(0.5);
+    expect(opts.surfaceFriction!.left).toBe(SPIN.friction);
+  });
+
+  it('la rigidez de la pelota llega al motor en pascales', () => {
+    expect(venueSimOptions(DEFAULT_VENUE).ballStiffness).toBe(SPIN.stiffness);
+    expect(venueSimOptions({ ...DEFAULT_VENUE, ballStiffnessKpa: 80 }).ballStiffness).toBe(80e3);
   });
 
   it('el aire caliente frena menos que el frio', () => {

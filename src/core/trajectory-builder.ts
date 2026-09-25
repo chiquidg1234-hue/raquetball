@@ -30,14 +30,17 @@ export class TrajectoryBuilder {
   ) {}
 
   /** Muestra en un instante exacto, sin tocar la rejilla. */
-  pushExact(t: number, p: Vec3, v: Vec3): void {
+  pushExact(t: number, p: Vec3, v: Vec3, w?: Vec3): void {
+    const sample: Sample = w
+      ? { t, p: clone(p), v: clone(v), w: clone(w) }
+      : { t, p: clone(p), v: clone(v) };
     const last = this.samples[this.samples.length - 1];
     if (last && Math.abs(last.t - t) < 1e-12) {
       // Ya hay una muestra en ese instante: sustituir por la exacta.
-      this.samples[this.samples.length - 1] = { t, p: clone(p), v: clone(v) };
+      this.samples[this.samples.length - 1] = sample;
       return;
     }
-    this.samples.push({ t, p: clone(p), v: clone(v) });
+    this.samples.push(sample);
     if (t >= this.nextSampleTime) {
       this.nextSampleTime =
         (Math.floor(t / this.sampleDt) + 1) * this.sampleDt;
@@ -51,15 +54,17 @@ export class TrajectoryBuilder {
   fillGrid(
     t0: number,
     t1: number,
-    at: (t: number) => { p: Vec3; v: Vec3 },
+    at: (t: number) => { p: Vec3; v: Vec3; w?: Vec3 },
   ): void {
     while (this.nextSampleTime <= t1 + 1e-12) {
       const t = this.nextSampleTime;
       if (t >= t0 - 1e-12) {
-        const { p, v } = at(t);
+        const { p, v, w } = at(t);
         const last = this.samples[this.samples.length - 1];
         if (!last || Math.abs(last.t - t) > 1e-12) {
-          this.samples.push({ t, p: clone(p), v: clone(v) });
+          this.samples.push(
+            w ? { t, p: clone(p), v: clone(v), w: clone(w) } : { t, p: clone(p), v: clone(v) },
+          );
         }
       }
       this.nextSampleTime += this.sampleDt;
@@ -77,6 +82,8 @@ export class TrajectoryBuilder {
     vIn: Vec3;
     vOut: Vec3;
     normal: Vec3;
+    /** Lo que sabe el motor con efecto: giro, deslizamiento, nick. */
+    extra?: Pick<Bounce, 'spinIn' | 'spinOut' | 'slipped' | 'nickTau' | 'rollout' | 'rolling'>;
   }): Bounce {
     const dIn = normalize(args.vIn);
     // Angulo respecto a la normal: 0 = perpendicular, 90 = rasante.
@@ -90,6 +97,15 @@ export class TrajectoryBuilder {
       outgoingSpeed: length(args.vOut),
       incidenceAngleDeg: (Math.acos(cosTheta) * 180) / Math.PI,
     };
+    const x = args.extra;
+    if (x) {
+      if (x.spinIn) bounce.spinIn = clone(x.spinIn);
+      if (x.spinOut) bounce.spinOut = clone(x.spinOut);
+      if (x.slipped !== undefined) bounce.slipped = x.slipped;
+      if (x.nickTau !== undefined) bounce.nickTau = x.nickTau;
+      if (x.rollout) bounce.rollout = true;
+      if (x.rolling) bounce.rolling = true;
+    }
     this.bounces.push(bounce);
     return bounce;
   }

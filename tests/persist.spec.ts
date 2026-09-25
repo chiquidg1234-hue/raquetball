@@ -84,7 +84,8 @@ describe('documento v2: la cancha viaja con el tiro', () => {
     ...withWalls(withBall(withPlace(DEFAULT_VENUE, 'elalto'), 'gearbox-black'), 'glass'),
     temperatureC: 9,
     pressureHpa: 628,
-    wallTangential: 0.58,
+    wallFriction: 0.58,
+    ballStiffnessKpa: 60,
   };
 
   it('la version actual es la 2', () => {
@@ -93,6 +94,20 @@ describe('documento v2: la cancha viaja con el tiro', () => {
 
   it('ida y vuelta conserva la cancha entera', () => {
     expect(fromVenueDoc(toVenueDoc(venue))).toEqual(venue);
+  });
+
+  it('un enlace de antes del efecto se abre: su "restitucion tangencial" se ignora', () => {
+    // Los v2 de antes traian wt/ft (0.3-0.95). No hay forma honesta de
+    // convertirla en friccion, asi que se usa la de la superficie.
+    const old = { ...toVenueDoc(venue), wt: 0.4, ft: 0.5 } as Record<string, unknown>;
+    delete old.wm;
+    delete old.fm;
+    delete old.e;
+    const back = fromVenueDoc(old);
+    expect(back.wallFriction).toBe(DEFAULT_VENUE.wallFriction);
+    expect(back.floorFriction).toBe(DEFAULT_VENUE.floorFriction);
+    expect(back.ballStiffnessKpa).toBe(DEFAULT_VENUE.ballStiffnessKpa);
+    expect(back.place).toBe('elalto');
   });
 
   it('por URL tambien', () => {

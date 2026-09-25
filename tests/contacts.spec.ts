@@ -14,19 +14,24 @@ import { simulate } from '../src/core/engine.js';
 import { PRESETS, resolvePreset } from '../src/core/presets.js';
 import { splitByBounce } from '../src/core/trajectory-utils.js';
 import { fromAzimuthElevation, v3 } from '../src/core/vec3.js';
+import { DEFAULT_VENUE, venueSimOptions } from '../src/core/venue.js';
 
 const STANCE = v3(COURT.width / 2, DEFAULT_CONTACT_HEIGHT, COURT.length * 0.68);
 
+const PHYSICS = venueSimOptions(DEFAULT_VENUE);
+
+/** Como lo carga la app: con el motor que pide el preset y el aire de referencia. */
 const fromPreset = (id: string) => {
   const preset = PRESETS.find((p) => p.id === id)!;
-  const r = resolvePreset(preset, STANCE);
+  const model = preset.prefersBallistic ? 'ballistic' : 'geometric';
+  const r = resolvePreset(preset, STANCE, { model, physics: PHYSICS });
   return simulate(
     {
       origin: r.origin,
       direction: fromAzimuthElevation(r.azimuthDeg, r.elevationDeg),
       speed: r.speed,
     },
-    { model: preset.prefersBallistic ? 'ballistic' : 'geometric' },
+    { model, ...(model === 'ballistic' ? PHYSICS : {}) },
   );
 };
 

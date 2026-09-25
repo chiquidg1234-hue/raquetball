@@ -15,16 +15,18 @@ import { fromAzimuthElevation, v3 } from '../src/core/vec3.js';
 
 const STANCE = v3(COURT.width / 2, DEFAULT_CONTACT_HEIGHT, COURT.length * 0.68);
 
+/** Como lo carga la app: con el motor que pide el preset, resuelto con la fisica. */
 const fromPreset = (id: string, stance = STANCE) => {
   const preset = PRESETS.find((p) => p.id === id)!;
-  const r = resolvePreset(preset, stance);
+  const model = preset.prefersBallistic ? 'ballistic' : 'geometric';
+  const r = resolvePreset(preset, stance, { model, physics: {} });
   const traj = simulate(
     {
       origin: r.origin,
       direction: fromAzimuthElevation(r.azimuthDeg, r.elevationDeg),
       speed: r.speed,
     },
-    { model: preset.prefersBallistic ? 'ballistic' : 'geometric' },
+    { model },
   );
   return { traj, origin: r.origin };
 };

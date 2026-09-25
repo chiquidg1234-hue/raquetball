@@ -18,18 +18,19 @@ import {
   isBallId,
   type BallId,
 } from './balls.js';
-import { BALL } from './constants.js';
+import { BALL, COR_SPEED } from './constants.js';
+import { SPIN } from './spin.js';
 import {
   COR_FACTOR_RANGE,
   FLOOR_MATERIALS,
-  TANGENTIAL_RANGE,
+  FRICTION_RANGE,
   WALL_MATERIALS,
   isFloorMaterialId,
   isWallMaterialId,
   type FloorMaterialId,
   type WallMaterialId,
 } from './surfaces.js';
-import type { SimOptions, SurfaceId } from './types.js';
+import type { SurfaceId, VenuePhysics } from './types.js';
 
 export type PlaceId =
   | 'ref'
@@ -81,9 +82,22 @@ export interface Venue {
   walls: WallMaterialId;
   floor: FloorMaterialId;
   wallCorFactor: number;
-  wallTangential: number;
+  /** mu de las paredes (y el techo). */
+  wallFriction: number;
   floorCorFactor: number;
-  floorTangential: number;
+  /** mu del piso. */
+  floorFriction: number;
+  /**
+   * Rigidez efectiva de la pelota, E (kPa). Solo decide el nick. Sin dato
+   * publicado: 45 es una estimacion (INVESTIGACION.md, seccion 8).
+   */
+  ballStiffnessKpa: number;
+  /**
+   * Fraccion del COR que se pierde por cada m/s de impacto por encima de la
+   * prueba de homologacion. Sin dato de racquetball: 0.92 % sale de squash
+   * y tenis (constants.ts, COR_SPEED).
+   */
+  corSpeedLoss: number;
 }
 
 export const LIMITS = {
@@ -93,7 +107,11 @@ export const LIMITS = {
   reboundIn: REBOUND_RANGE_IN,
   corPerDegree: { min: 0, max: 0.01 },
   corFactor: COR_FACTOR_RANGE,
-  tangential: TANGENTIAL_RANGE,
+  friction: FRICTION_RANGE,
+  /** De una pelota blanda (20 kPa) a la de squash (~100) y algo mas. */
+  ballStiffnessKpa: { min: 20, max: 150 },
+  /** De COR constante (0) al doble de la pendiente de squash y tenis. */
+  corSpeedLoss: { min: 0, max: 0.02 },
 } as const;
 
 /** Lo que equivale al motor de antes: nivel del mar, 20 C, pelota de 70 in. */
@@ -108,9 +126,11 @@ export const DEFAULT_VENUE: Venue = {
   walls: 'panel',
   floor: 'wood',
   wallCorFactor: WALL_MATERIALS.panel.corFactor,
-  wallTangential: WALL_MATERIALS.panel.tangential,
+  wallFriction: WALL_MATERIALS.panel.friction,
   floorCorFactor: FLOOR_MATERIALS.wood.corFactor,
-  floorTangential: FLOOR_MATERIALS.wood.tangential,
+  floorFriction: FLOOR_MATERIALS.wood.friction,
+  ballStiffnessKpa: SPIN.stiffness / 1000,
+  corSpeedLoss: COR_SPEED.lossPerMs,
 };
 
 const clamp = (v: number, lo: number, hi: number): number =>
@@ -122,6 +142,8 @@ const num = (v: unknown, fallback: number, lo: number, hi: number): number =>
 /**
  * Normaliza cualquier cosa a un Venue valido: lo que no entienda lo toma
  * del valor por defecto. Se usa al restaurar de localStorage y de la URL.
+ * Los documentos de antes traian una "restitucion tangencial" que ya no
+ * existe (no hay forma honesta de pasarla a friccion): se ignora.
  */
 export const normalizeVenue = (raw: unknown): Venue => {
   const d = DEFAULT_VENUE;
@@ -150,9 +172,16 @@ export const normalizeVenue = (raw: unknown): Venue => {
     walls: isWallMaterialId(r.walls) ? r.walls : d.walls,
     floor: isFloorMaterialId(r.floor) ? r.floor : d.floor,
     wallCorFactor: num(r.wallCorFactor, d.wallCorFactor, LIMITS.corFactor.min, LIMITS.corFactor.max),
-    wallTangential: num(r.wallTangential, d.wallTangential, LIMITS.tangential.min, LIMITS.tangential.max),
+    wallFriction: num(r.wallFriction, d.wallFriction, LIMITS.friction.min, LIMITS.friction.max),
     floorCorFactor: num(r.floorCorFactor, d.floorCorFactor, LIMITS.corFactor.min, LIMITS.corFactor.max),
-    floorTangential: num(r.floorTangential, d.floorTangential, LIMITS.tangential.min, LIMITS.tangential.max),
+    floorFriction: num(r.floorFriction, d.floorFriction, LIMITS.friction.min, LIMITS.friction.max),
+    ballStiffnessKpa: num(
+      r.ballStiffnessKpa,
+      d.ballStiffnessKpa,
+      LIMITS.ballStiffnessKpa.min,
+      LIMITS.ballStiffnessKpa.max,
+    ),
+    corSpeedLoss: num(r.corSpeedLoss, d.corSpeedLoss, LIMITS.corSpeedLoss.min, LIMITS.corSpeedLoss.max),
   };
 };
 
@@ -174,14 +203,14 @@ export const withWalls = (v: Venue, walls: WallMaterialId): Venue => ({
   ...v,
   walls,
   wallCorFactor: WALL_MATERIALS[walls].corFactor,
-  wallTangential: WALL_MATERIALS[walls].tangential,
+  wallFriction: WALL_MATERIALS[walls].friction,
 });
 
 export const withFloor = (v: Venue, floor: FloorMaterialId): Venue => ({
   ...v,
   floor,
   floorCorFactor: FLOOR_MATERIALS[floor].corFactor,
-  floorTangential: FLOOR_MATERIALS[floor].tangential,
+  floorFriction: FLOOR_MATERIALS[floor].friction,
 });
 
 export interface VenueAir {
@@ -220,19 +249,23 @@ const WALLS: readonly SurfaceId[] = ['front', 'back', 'left', 'right', 'ceiling'
  * El sitio de juego como opciones del motor. El geometrico las ignora (no
  * tiene aire ni perdidas); el balistico usa todas.
  */
-export const venueSimOptions = (
-  v: Venue,
-): Pick<SimOptions, 'dragK' | 'surfaceRestitution' | 'surfaceTangential'> => {
+export const venueSimOptions = (v: Venue): VenuePhysics => {
   const e = venueBallCor(v);
   const surfaceRestitution: Partial<Record<SurfaceId, number>> = {};
-  const surfaceTangential: Partial<Record<SurfaceId, number>> = {};
+  const surfaceFriction: Partial<Record<SurfaceId, number>> = {};
   for (const id of WALLS) {
     surfaceRestitution[id] = Math.min(0.98, e * v.wallCorFactor);
-    surfaceTangential[id] = v.wallTangential;
+    surfaceFriction[id] = v.wallFriction;
   }
   surfaceRestitution.floor = Math.min(0.98, e * v.floorCorFactor);
-  surfaceTangential.floor = v.floorTangential;
-  return { dragK: venueAir(v).dragK, surfaceRestitution, surfaceTangential };
+  surfaceFriction.floor = v.floorFriction;
+  return {
+    dragK: venueAir(v).dragK,
+    surfaceRestitution,
+    surfaceFriction,
+    ballStiffness: v.ballStiffnessKpa * 1000,
+    corSpeedLoss: v.corSpeedLoss,
+  };
 };
 
 export const sameVenue = (a: Venue, b: Venue): boolean =>

@@ -7,7 +7,7 @@ import { judgeServe } from '../src/core/rules.js';
 import { PRESETS, resolvePreset } from '../src/core/presets.js';
 import { TOSS_DEFAULTS, inServiceZone, simulateToss } from '../src/core/serveToss.js';
 import { DEFAULT_VENUE, venueSimOptions, withPlace } from '../src/core/venue.js';
-import { normalize, sub, v3 } from '../src/core/vec3.js';
+import { fromAzimuthElevation, normalize, sub, v3 } from '../src/core/vec3.js';
 
 const physics = venueSimOptions(DEFAULT_VENUE);
 const spot = { x: COURT.width / 2 + 0.35, z: (COURT.serviceLine + COURT.shortLine) / 2 };
@@ -125,12 +125,20 @@ describe('el bote de saque no es un bote del tiro (P1)', () => {
 
 describe('los saques de la biblioteca con el bote de mano', () => {
   it('siguen siendo legales con la altura que da el bote por defecto', () => {
+    // Como en la app: primero el bote con la mano da la altura del golpe, y
+    // desde ahi el preset se resuelve con la fisica (primer contacto de
+    // verdad en su punto de mira).
     for (const preset of PRESETS.filter((p) => p.group === 'saque')) {
-      const r = resolvePreset(preset);
-      const t = simulateToss(r.origin.x, r.origin.z, TOSS_DEFAULTS, physics);
-      const origin = t.strike.point;
+      const spot = resolvePreset(preset);
+      const t = simulateToss(spot.origin.x, spot.origin.z, TOSS_DEFAULTS, physics);
+      const r = resolvePreset(preset, undefined, {
+        model: 'ballistic',
+        physics,
+        strikeHeight: t.strike.point.y,
+      });
+      const origin = r.origin;
       const shot = simulate(
-        { origin, direction: normalize(sub(r.target, origin)), speed: r.speed },
+        { origin, direction: fromAzimuthElevation(r.azimuthDeg, r.elevationDeg), speed: r.speed },
         { model: 'ballistic', ...physics },
       );
       expect(judgeServe(shot, origin, t).legal, preset.id).toBe(true);

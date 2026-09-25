@@ -238,16 +238,16 @@ export const createVenuePanel = (): PanelView => {
     format: factor,
     onInput: (v) => setVenue({ wallCorFactor: v }),
   });
-  const wallTangential = slider({
-    field: 'venue-wall-tangential',
-    label: 'Paredes: restitución tangencial',
-    min: LIMITS.tangential.min,
-    max: LIMITS.tangential.max,
+  const wallFriction = slider({
+    field: 'venue-wall-friction',
+    label: 'Paredes: fricción μ',
+    min: LIMITS.friction.min,
+    max: LIMITS.friction.max,
     step: 0.01,
-    value: state.venue.wallTangential,
+    value: state.venue.wallFriction,
     format: plain,
-    hint: 'Cuanto "raspa" la pared: la velocidad paralela que conserva la pelota.',
-    onInput: (v) => setVenue({ wallTangential: v }),
+    hint: 'Cuánto "agarra" la pared: de ella sale el efecto (el Z que sale paralelo a la trasera). 0.9 sale de una medida con pelota de racquetball sobre madera.',
+    onInput: (v) => setVenue({ wallFriction: v }),
   });
   const floorCor = slider({
     field: 'venue-floor-cor',
@@ -259,15 +259,38 @@ export const createVenuePanel = (): PanelView => {
     format: factor,
     onInput: (v) => setVenue({ floorCorFactor: v }),
   });
-  const floorTangential = slider({
-    field: 'venue-floor-tangential',
-    label: 'Piso: restitución tangencial',
-    min: LIMITS.tangential.min,
-    max: LIMITS.tangential.max,
+  const floorFriction = slider({
+    field: 'venue-floor-friction',
+    label: 'Piso: fricción μ',
+    min: LIMITS.friction.min,
+    max: LIMITS.friction.max,
     step: 0.01,
-    value: state.venue.floorTangential,
+    value: state.venue.floorFriction,
     format: plain,
-    onInput: (v) => setVenue({ floorTangential: v }),
+    hint: 'Un bote rasante desliza y sale con efecto liftado, que después hace "trepar" la pelota por la pared del fondo. Si en tu cancha sale menos, bájalo.',
+    onInput: (v) => setVenue({ floorFriction: v }),
+  });
+  const stiffness = slider({
+    field: 'venue-ball-stiffness',
+    label: 'Pelota: rigidez E (nick)',
+    min: LIMITS.ballStiffnessKpa.min,
+    max: LIMITS.ballStiffnessKpa.max,
+    step: 1,
+    value: state.venue.ballStiffnessKpa,
+    format: (v) => `${v.toFixed(0)} kPa`,
+    hint: 'Decide cuánto dura el contacto con la pared y, con eso, si un tiro al crack sale rodando. No está publicada: 45 kPa es una estimación. Más blanda = rollout más fácil.',
+    onInput: (v) => setVenue({ ballStiffnessKpa: v }),
+  });
+  const corSpeed = slider({
+    field: 'venue-cor-speed',
+    label: 'COR que se pierde con la velocidad',
+    min: LIMITS.corSpeedLoss.min * 100,
+    max: LIMITS.corSpeedLoss.max * 100,
+    step: 0.01,
+    value: state.venue.corSpeedLoss * 100,
+    format: (v) => `${v.toFixed(2)} % por m/s`,
+    hint: 'Toda pelota hueca rebota menos cuanto más fuerte llega. De racquetball no hay medida a velocidad de juego: 0.92 % sale de squash y tenis. 0 = COR constante.',
+    onInput: (v) => setVenue({ corSpeedLoss: v / 100 }),
   });
   const corPerDegree = slider({
     field: 'venue-cor-temperature',
@@ -288,9 +311,11 @@ export const createVenuePanel = (): PanelView => {
       text: 'No existe ninguna medida publicada del rebote de una pelota de racquetball contra panel, revoque, cristal, madera o cemento. Todas las superficies arrancan iguales; si en tu cancha la pelota sale más viva o más muerta, ajústalo aquí.',
     }),
     wallCor.root,
-    wallTangential.root,
+    wallFriction.root,
     floorCor.root,
-    floorTangential.root,
+    floorFriction.root,
+    stiffness.root,
+    corSpeed.root,
     corPerDegree.root,
   ]);
 
@@ -322,9 +347,11 @@ export const createVenuePanel = (): PanelView => {
     [temperature, () => state.venue.temperatureC],
     [rebound, () => state.venue.reboundIn],
     [wallCor, () => state.venue.wallCorFactor],
-    [wallTangential, () => state.venue.wallTangential],
+    [wallFriction, () => state.venue.wallFriction],
     [floorCor, () => state.venue.floorCorFactor],
-    [floorTangential, () => state.venue.floorTangential],
+    [floorFriction, () => state.venue.floorFriction],
+    [stiffness, () => state.venue.ballStiffnessKpa],
+    [corSpeed, () => state.venue.corSpeedLoss * 100],
     [corPerDegree, () => state.venue.corPerDegree * 100],
   ];
 

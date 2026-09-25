@@ -19,7 +19,7 @@
 import { COURT } from './constants.js';
 import { simulateBallistic } from './engine-ballistic.js';
 import { stateAt } from './trajectory-utils.js';
-import type { Bounce, Sample, SimOptions, Trajectory, Vec3 } from './types.js';
+import type { Bounce, Sample, Trajectory, Vec3, VenuePhysics } from './types.js';
 
 export interface TossParams {
   /** Altura del centro de la pelota al soltarla, en m. */
@@ -77,7 +77,7 @@ export const simulateToss = (
   x: number,
   z: number,
   params: TossParams,
-  physics: Pick<SimOptions, 'dragK' | 'surfaceRestitution' | 'surfaceTangential'> = {},
+  physics: VenuePhysics = {},
 ): Toss => {
   const releaseHeight = clamp(
     params.releaseHeight,

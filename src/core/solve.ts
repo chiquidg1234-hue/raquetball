@@ -28,7 +28,7 @@ import { readableSequence } from './contacts.js';
 import { CENTER_BOX } from './court.js';
 import { CLASS_LABEL, classify } from './rules.js';
 import { simulate } from './engine.js';
-import type { PhysicsModel, Shot, SimOptions, Trajectory, Vec3 } from './types.js';
+import type { PhysicsModel, Shot, Trajectory, Vec3, VenuePhysics } from './types.js';
 import { fromAzimuthElevation, normalize, sub } from './vec3.js';
 
 /** Que bote de PISO se quiere colocar. Solo los tres primeros importan. */
@@ -72,7 +72,7 @@ export interface SolveOptions {
    * (`venueSimOptions`). Sin esto el solver apuntaria con el aire de nivel
    * del mar aunque se juegue en El Alto, y el bote caeria en otro sitio.
    */
-  physics?: Pick<SimOptions, 'dragK' | 'surfaceRestitution' | 'surfaceTangential'>;
+  physics?: VenuePhysics;
   /** Tambien buscar la velocidad, no solo los angulos. */
   searchSpeed?: boolean;
   maxIterations?: number;

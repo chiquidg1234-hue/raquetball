@@ -315,6 +315,47 @@ El modelo lo predice sin ajustar nada:
 4. Una pelota que llega a 45° sale a **~23°** de la normal en vez de a 45°: casi
    perpendicular a la lateral, es decir **casi paralela a la trasera**.
 
+**Lo que da el motor (ronda 2, `src/core/spin.ts`).** La cuenta de arriba supone que la
+pelota llega a la segunda lateral a 45°. Con la pelota cruzando la cancha de verdad
+(de lateral a lateral, sin aire ni gravedad, 45° en la primera) sale de la segunda a
+**9.1°** de la normal, y el motor lo reproduce a 10⁻⁶ grados (`tests/spin.spec.ts`):
+izquierda → la paralela queda en 0.6146·v y el punto de contacto gira a −0.6646·v; en la
+derecha ese giro se suma, u = 1.2791·v, la paralela queda en 0.1215·v y la normal en
+e²·v = 0.7607·v → atan(0.1215/0.7607) = 9.1°. Sin efecto (0.65 fijo): 29°. Con reflexión
+ideal: 45°. En el Z serve de la biblioteca sale a **~8°**.
+
+**Por qué el Z solo sale desde un costado.** Frontal y lateral en la esquina hacen de
+retrorreflector: la pelota vuelve **paralela a como vino** (cada pared cambia una
+componente; con agarre, las dos por el mismo factor). Desde el centro de la zona de saque
+esa paralela llega a la pared del fondo antes de cruzar la cancha; desde ~1.3 m (4 ft)
+de la lateral contraria cruza, bota al fondo pegada a la otra lateral y la toca. Esa
+posición sale de la geometría, no de una fuente: las guías que se pudieron leer no dan
+la distancia. El resultado sí coincide con
+[racquetball-lessons.com](https://racquetball-lessons.com/2011/01/15/z-serves-and-court-positioning/):
+"a properly executed z-serve will land deep into a corner and near a sidewall, and because
+of the spin on the ball, will come out mostly parallel to the back wall".
+
+**Techo y pared del fondo.** El mismo modelo explica dos cosas que se ven en cancha:
+- La *ceiling ball*: el techo la hace rodar hacia la frontal, y llega a la frontal
+  "ya rodando" pared abajo: no pierde velocidad vertical, bota fuerte y sube. Por eso
+  hay que tocar el techo cerca de la frontal (a 60 cm, "1-3 ft") y sin mucha fuerza.
+- Un bote rasante desliza y sale con efecto liftado; ese efecto, contra la pared del
+  fondo, hace **trepar** la pelota. Las guías lo describen al revés, desde el que
+  golpea: la pelota sin efecto "may bounce and carry all the way to the back wall to
+  spring way off", la liftada "tumbles over… to stay down"
+  ([Racquetball Techniques](http://www.racquetballtechniques.com/topspin-at-its-very-best/)).
+  El tamaño del salto depende de μ del piso, medido solo a baja velocidad: se calibra en
+  el panel Cancha.
+
+**Rodar.** Tras un nick, o cuando ya casi no bota, la pelota va pegada al piso: el aire y
+la rodadura la frenan (a = F/(m(1+α)), porque el piso la obliga a seguir rodando). La
+resistencia a la rodadura no está medida para racquetball: la de una pelota de tenis en
+tres pistas es 0.04 ± 0.005 aplastada con 37 N por pelota
+([Cross 2003, Sports Engineering](https://link.springer.com/article/10.1007/BF02903531));
+una lisa que rueda con su propio peso (0.39 N) se aplasta mucho menos: se usa **0.02**
+(estimación). Rodando contra una pared toca pared y piso a la vez, como en el nick: las
+dos fricciones se oponen y sale en horizontal, sin saltar.
+
 ### Magnus en vuelo: no se modela, y por qué
 
 A los números de Reynolds del racquetball (1–3·10⁵) una esfera lisa está en la zona
@@ -354,6 +395,21 @@ H* = 0.6–0.75 es un centro a **34–43 mm** del piso (el borde inferior a 6–
   plano desde la rodilla baja a unos 3°: τ ≈ 2.6, así que no hace nick, pero la
   fricción de la frontal le quita el 38 % de la velocidad vertical y lo convierte en
   efecto hacia delante, y sale rasante.
+
+**Qué tiros hacen nick en el motor** (apuntados a la franja con `src/core/aimWall.ts`,
+que resuelve con el mismo motor hasta 1 mm):
+
+| Tiro | Condición | τ |
+|---|---|---|
+| Saque al crack (frontal → lateral a 8.5 m) | 25–35 m/s desde la zona de saque | 0.74–0.94 → **rollout** |
+| Saque al crack, más fuerte | 38–45 m/s | ≥ 1: rebota normal |
+| Kill al crack desde la cintura (1.1 m) | 40–45 m/s desde 5.5–8 m | 0.85 → **rollout** |
+| Kill al crack desde la rodilla (0.45 m) | cualquier velocidad | 1.8: no sale nunca |
+
+El saque al crack sale con facilidad porque la pelota llega a la lateral con poca
+velocidad **hacia ella** (contacto largo) y bajando: en el plano de la lateral el ángulo
+es grande. El kill necesita bajar: desde la rodilla llega demasiado plano. Todo esto
+escala con E, que no está medida: con una pelota más blanda salen más rollouts.
 
 ## 9. El bote de saque es su propio movimiento
 
@@ -415,3 +471,34 @@ en el punto de impacto. Es del orden del smash de bádminton, 52–56 m/s
 **Slice.** Un golpe cortado es la cara moviéndose en oblicuo respecto a su normal. El
 mismo modelo de agarre, ahora pelota contra cuerdas, da el giro de salida, y ese giro
 viaja con el tiro y cambia cada rebote.
+
+## 11. El COR baja con la velocidad del impacto
+
+La prueba de homologación mide el COR a **6.9 m/s** (100 in, con aire). En la frontal
+se llega a 40–60 m/s. Toda pelota hueca de goma medida rebota **menos** cuanto más fuerte
+llega: se aplasta más, la pared se dobla hacia dentro y pierde energía
+([Cross, "Impact behavior of hollow balls"](https://www.researchgate.net/publication/262990295_Impact_behavior_of_hollow_balls);
+[Haake, Carré y Goodwill 2003](https://doi.org/10.1080/0264041031000140329): "the
+coefficient of restitution reduced with velocity for impacts on a rigid surface").
+
+**De racquetball no hay ninguna medida a velocidad de juego** (solo caídas: 0.87–0.90
+desde 3.5 ft con cámara de 1200 fps,
+[Krieg](https://www.slideserve.com/kenyon-anderson/lab-2-bouncing-ball-supplemental-testing-powerpoint-ppt-presentation),
+lo mismo que nuestro 0.872). Las pelotas análogas medidas contra pared rígida:
+
+| Pelota | Rango | Pendiente | Fuente |
+|---|---|---|---|
+| Squash (Dunlop doble punto amarillo, 25 °C) | 13–29 m/s | COR = 0.47 − 0.0076·v | [ISJOS v13](https://www.isjos.org/pdfs/ISJOS_v13_p4.pdf) |
+| Tenis contra raqueta fija | 13–36 m/s | −0.009 por m/s | [ISJOS v9](https://www.isjos.org/pdfs/ISJOS_v9_p3.pdf) |
+
+**Modelo:** COR(vₙ) = COR·(1 − λ·(vₙ − 6.9)) por encima de la velocidad de la prueba,
+con **λ = 0.92 % por m/s** (0.008 sobre 0.872, la pendiente de las análogas), y
+**congelado a 40 m/s** (0.606): más allá no hay medidas de nada parecido y la recta
+llevaría el COR a cero. Es multiplicativo para que una superficie calibrada muerta no
+pase a negativo, depende de la velocidad **normal** (es la que aplasta la pelota) y
+es calibrable en el panel Cancha (0 = COR constante, como antes). Es una estimación.
+
+**Qué cambia en cancha:** la pelota sale de la frontal a ~61 % en vez de a ~87 % en los
+tiros fuertes. Un pase a 28 m/s con la frontal a 0.8 m bota a ~5 m y da el segundo bote
+a 11.5 m en el rincón, antes de la pared del fondo; con el COR constante, cualquier pase
+fuerte llegaba a la pared del fondo y volvía hasta la frontal.

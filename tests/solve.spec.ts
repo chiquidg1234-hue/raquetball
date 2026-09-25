@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { COURT, DEFAULT_CONTACT_HEIGHT } from '../src/core/constants.js';
 import { CENTER_BOX } from '../src/core/court.js';
 import { simulate } from '../src/core/engine.js';
+import { presetById, resolvePreset } from '../src/core/presets.js';
 import {
   NAMED_TARGETS,
   frontWallAimPoint,
@@ -263,19 +264,30 @@ describe('alternativas', () => {
   });
 
   it('por defecto conserva que el tiro abra por la frontal', () => {
+    // Antes se partia de un pase a 45 m/s. Con el efecto y el COR que baja
+    // con la velocidad, ese tiro sube por la pared del fondo y vuelve: su
+    // 2.o bote ya no esta en el fondo y el escenario no existe. Se parte
+    // del pase cruzado de la biblioteca (28 m/s, frontal a 0.8 m), que da
+    // el 2.o bote en el rincon izquierdo, y se arrastra al centro del fondo.
     const origin = v3(3.05, 0.9, 8.2);
-    const b1 = landing(origin, -6.5, 0.5, 45, 'ballistic', 1)!;
+    const pass = resolvePreset(presetById('cross-court-left')!, origin, {
+      model: 'ballistic',
+      physics: {},
+    });
+    const seed: [number, number] = [pass.azimuthDeg, pass.elevationDeg];
+    const b1 = landing(origin, seed[0], seed[1], pass.speed, 'ballistic', 1)!;
     const r = solveAim(
       {
         origin,
-        speed: 45,
+        speed: pass.speed,
         model: 'ballistic',
-        seed: [-6.5, 0.5],
+        seed,
         keepBounces: [{ x: b1.point.x, z: b1.point.z }],
         firstSurface: 'front',
       },
-      { x: 4.6, z: 10.8, bounceIndex: 2 },
+      { x: 2.4, z: 11.0, bounceIndex: 2 },
     );
+    expect(r.ok).toBe(true);
     expect(r.family!.startsWith('F')).toBe(true);
     expect(r.kindLabel).toBe('passing shot');
   });

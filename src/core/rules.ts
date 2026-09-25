@@ -351,7 +351,12 @@ export const classify = (
       };
     }
 
-    if (firstFloor && firstFloor.point.z > COURT.shortLine) {
+    // Pase: bota pasada la linea de servicio y sigue hacia el fondo. Con la
+    // fisica de ahora (COR que baja con la velocidad) un pase que muere en
+    // el rincon da el 1.er bote a ~5 m, entre la linea de servicio y la
+    // corta, y el 2.o antes de la trasera: sigue pasando al que recibe,
+    // que espera detras de la linea corta.
+    if (firstFloor && firstFloor.point.z > COURT.serviceLine) {
       return {
         classification: 'pass',
         detail: `Bota a ${firstFloor.point.z.toFixed(1)} m${

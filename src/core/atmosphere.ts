@@ -137,6 +137,13 @@ export const corFromDropTest = (
   return Math.sqrt(up / down);
 };
 
+/**
+ * Velocidad con la que llega al piso una pelota soltada desde `dropM`, con
+ * arrastre cuadratico: v^2 = (g/k)(1 - e^(-2kh)). Sin aire, sqrt(2gh).
+ */
+export const dropImpactSpeed = (dropM: number, k: number, g = 9.81): number =>
+  k <= 1e-12 ? Math.sqrt(2 * g * dropM) : Math.sqrt((g / k) * -Math.expm1(-2 * k * dropM));
+
 /** La inversa: a que altura rebota una pelota con este COR. */
 export const reboundFromCor = (cor: number, dropM: number, k: number): number => {
   if (k <= 1e-12) return cor * cor * dropM;

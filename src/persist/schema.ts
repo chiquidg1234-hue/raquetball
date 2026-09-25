@@ -72,11 +72,21 @@ export interface VenueDoc {
   /** paredes y piso */
   w: string;
   f: string;
-  /** calibracion: factor de COR y restitucion tangencial */
+  /** calibracion: factor de COR y friccion (mu) de paredes y piso */
   wc: number;
-  wt: number;
+  wm?: number;
   fc: number;
-  ft: number;
+  fm?: number;
+  /** rigidez de la pelota, kPa */
+  e?: number;
+  /** COR que se pierde por m/s de impacto (fraccion) */
+  cv?: number;
+  /**
+   * Restitucion tangencial de los documentos de antes del efecto. Ya no se
+   * usa: no hay forma honesta de pasarla a friccion. Se lee y se ignora.
+   */
+  wt?: number;
+  ft?: number;
 }
 
 /** El bote con la mano del saque (solo si el tiro es un saque). */
@@ -155,9 +165,11 @@ export const toVenueDoc = (v: Venue): VenueDoc => {
     w: v.walls,
     f: v.floor,
     wc: r3(v.wallCorFactor),
-    wt: r3(v.wallTangential),
+    wm: r3(v.wallFriction),
     fc: r3(v.floorCorFactor),
-    ft: r3(v.floorTangential),
+    fm: r3(v.floorFriction),
+    e: r3(v.ballStiffnessKpa),
+    cv: Math.round(v.corSpeedLoss * 1e5) / 1e5,
   };
   if (v.pressureHpa != null) doc.hp = r3(v.pressureHpa);
   return doc;
@@ -178,9 +190,11 @@ export const fromVenueDoc = (raw: unknown): Venue => {
     walls: d.w,
     floor: d.f,
     wallCorFactor: d.wc,
-    wallTangential: d.wt,
+    wallFriction: d.wm,
     floorCorFactor: d.fc,
-    floorTangential: d.ft,
+    floorFriction: d.fm,
+    ballStiffnessKpa: d.e,
+    corSpeedLoss: d.cv,
   });
 };
 

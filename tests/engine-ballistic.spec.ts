@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BALL,
+  COR_SPEED,
   COURT,
   DRAG_K,
   GRAVITY,
   IN,
   SIM,
+  corAtSpeed,
 } from '../src/core/constants.js';
 import { BALL_TEST_AIR, airDensity, dragConstant } from '../src/core/atmosphere.js';
 import { CENTER_BOX, penetrationDepth } from '../src/core/court.js';
 import { simulateBallistic } from '../src/core/engine-ballistic.js';
+import { SPIN } from '../src/core/spin.js';
 import { PRESETS, resolvePreset } from '../src/core/presets.js';
 import type { Shot } from '../src/core/types.js';
 import { fromAzimuthElevation, length, v3 } from '../src/core/vec3.js';
@@ -22,9 +25,20 @@ const shot = (partial: Partial<Shot> = {}): Shot => ({
   ...partial,
 });
 
-/** Energia especifica: v^2/2 + g*y. Sin masa, que se cancela. */
-const energy = (p: { y: number }, v: { x: number; y: number; z: number }) =>
-  (v.x * v.x + v.y * v.y + v.z * v.z) / 2 + GRAVITY * p.y;
+/**
+ * Energia especifica: v^2/2 + g*y + la de rotacion, alpha R^2 w^2/2. Sin
+ * masa, que se cancela. Desde que la pelota gira hay que contarla: un
+ * rebote puede pasar giro a velocidad (el efecto liftado "patea" hacia
+ * delante) y sin ella parecia que la pelota ganaba energia.
+ */
+const energy = (
+  p: { y: number },
+  v: { x: number; y: number; z: number },
+  w?: { x: number; y: number; z: number },
+) =>
+  (v.x * v.x + v.y * v.y + v.z * v.z) / 2 +
+  GRAVITY * p.y +
+  (w ? (SPIN.inertiaFactor * BALL.radius ** 2 * (w.x * w.x + w.y * w.y + w.z * w.z)) / 2 : 0);
 
 // ---------------------------------------------------------------- arrastre
 
@@ -106,7 +120,10 @@ describe('criterios de aceptacion del motor balistico', () => {
     const apex = Math.max(
       ...traj.samples.filter((s) => s.t > first.time).map((s) => s.p.y),
     );
-    expect(apex - BALL.radius).toBeCloseTo(BALL.restitution ** 2 * drop, 2);
+    // Sin aire llega a 7.0 m/s, un pelo mas que en la prueba: el COR es el
+    // de esa velocidad (0.8712), no exactamente 0.8722.
+    const e = corAtSpeed(BALL.restitution, Math.sqrt(2 * GRAVITY * drop));
+    expect(apex - BALL.radius).toBeCloseTo(e ** 2 * drop, 3);
   });
 
   it('2. la energia total nunca aumenta entre dos muestras consecutivas', () => {
@@ -117,8 +134,8 @@ describe('criterios de aceptacion del motor balistico', () => {
       for (let i = 1; i < traj.samples.length; i++) {
         const prev = traj.samples[i - 1]!;
         const cur = traj.samples[i]!;
-        const before = energy(prev.p, prev.v);
-        const after = energy(cur.p, cur.v);
+        const before = energy(prev.p, prev.v, prev.w);
+        const after = energy(cur.p, cur.v, cur.w);
         // Tolerancia solo para el ruido de coma flotante del integrador.
         expect(after, `az=${az} muestra ${i}`).toBeLessThanOrEqual(
           before + 1e-6 * Math.max(1, before),
@@ -216,27 +233,64 @@ describe('modelo de rebote', () => {
     );
     const b = traj.bounces[0]!;
     expect(b.surface).toBe('floor');
-    expect(b.outgoingSpeed / b.incomingSpeed).toBeCloseTo(BALL.restitution, 3);
+    // Llega a 12.2 m/s, mas rapido que en la prueba de homologacion: el COR
+    // ya no es el 0.872 de la prueba sino el que toca a esa velocidad.
+    expect(b.outgoingSpeed / b.incomingSpeed).toBeCloseTo(
+      corAtSpeed(BALL.restitution, b.incomingSpeed),
+      3,
+    );
+    expect(b.outgoingSpeed / b.incomingSpeed).toBeLessThan(BALL.restitution);
   });
 
-  it('la restitucion tangencial frena la componente paralela', () => {
+  it('el COR baja con la velocidad del impacto y se congela a 40 m/s', () => {
+    // A la velocidad de la prueba (6.9 m/s con aire) es el de la prueba.
+    expect(COR_SPEED.reference).toBeCloseTo(6.89, 2);
+    expect(corAtSpeed(0.872, COR_SPEED.reference)).toBeCloseTo(0.872, 12);
+    expect(corAtSpeed(0.872, 3)).toBe(0.872);
+    // Cada m/s por encima quita un 0.92 %: a 30 m/s, 0.872 (1 - 0.0092 * 23.1).
+    expect(corAtSpeed(0.872, 30)).toBeCloseTo(0.872 * (1 - 0.0092 * (30 - COR_SPEED.reference)), 12);
+    expect(corAtSpeed(0.872, 30)).toBeCloseTo(0.687, 3);
+    // Por encima de 40 m/s no hay medidas analogas: no se extrapola.
+    expect(corAtSpeed(0.872, 85)).toBe(corAtSpeed(0.872, 40));
+    expect(corAtSpeed(0.872, 40)).toBeCloseTo(0.606, 3);
+    // Y con la perdida a 0 es el COR constante de antes.
+    expect(corAtSpeed(0.872, 60, 0)).toBe(0.872);
+  });
+
+  // Antes habia un solo test: "la restitucion tangencial frena la
+  // componente paralela" al 65 %. Ese 0.65 no salia de ninguna medida y la
+  // pelota no giraba. Ahora el rebote es con friccion y giro (spin.ts): el
+  // motor de antes queda para comparar, y el nuevo se comprueba con su cuenta.
+  const floor45 = (disableSpin: boolean) => {
     const traj = simulateBallistic(
       shot({
         origin: v3(3, 2.0, 8),
         direction: fromAzimuthElevation(0, -45),
         speed: 20,
       }),
-      { disableDrag: true, maxBounces: 1 },
+      { disableDrag: true, maxBounces: 1, disableSpin },
     );
     const contact = traj.bounces[0]!.time;
     // La muestra del contacto guarda la velocidad SALIENTE.
     const after = traj.samples.find((s) => Math.abs(s.t - contact) < 1e-12)!;
     const before = traj.samples.filter((s) => s.t < contact).at(-1)!;
-    // La componente Z es tangencial al piso: se conserva al 65 %.
-    expect(Math.abs(after.v.z / before.v.z)).toBeCloseTo(
-      BALL.tangentialRestitution,
-      2,
-    );
+    return { after, before };
+  };
+
+  it('sin efecto (el motor de antes): la paralela se queda al 65 %', () => {
+    const { after, before } = floor45(true);
+    expect(Math.abs(after.v.z / before.v.z)).toBeCloseTo(BALL.tangentialRestitution, 2);
+  });
+
+  it('con efecto: una pelota sin giro agarra y la paralela queda en 1 - alpha(1+ex)/(1+alpha)', () => {
+    // 1 - 0.58 * 1.05/1.58 = 0.6146, y sale girando hacia delante.
+    const { after, before } = floor45(false);
+    const keep = 1 - (SPIN.inertiaFactor * (1 + SPIN.tangentialCor)) / (1 + SPIN.inertiaFactor);
+    expect(Math.abs(after.v.z / before.v.z)).toBeCloseTo(keep, 2);
+    // Gira en el sentido de rodar hacia donde va: (y x v) . w > 0. Aqui va
+    // hacia la frontal (-z), asi que es w_x < 0.
+    const rollSense = after.v.z * after.w!.x - after.v.x * after.w!.z;
+    expect(rollSense).toBeGreaterThan(0);
   });
 
   it('admite un COR distinto por superficie', () => {

@@ -7,7 +7,7 @@
  * campos, asi que cambiar de modo nunca pierde el tiro actual.
  */
 
-import { DEFAULT_CONTACT_HEIGHT, COURT, SPEED } from '../core/constants.js';
+import { DEFAULT_CONTACT_HEIGHT, COURT } from '../core/constants.js';
 import { clampToCourt } from '../core/court.js';
 import { simulate } from '../core/engine.js';
 import type {
@@ -154,26 +154,27 @@ export const simOptionsFor = (model: PhysicsModel, venue: Venue): SimOptions => 
 });
 
 /**
- * Tiro con el que abre la app: un pase por la izquierda que bota a 9 m,
- * sale de la trasera y vuelve a botar dos veces. Se eligio con el propio
- * solver. Abria con un tiro geometrico recto, y sin gravedad la pelota no
- * da ni un bote de piso: las tarjetas de botes, que son lo que mas importa
- * leer, salian vacias al entrar.
+ * Tiro con el que abre la app: el pase cruzado de la biblioteca (28 m/s,
+ * frontal a 0.8 m), resuelto con el aire de referencia. Bota a 5.1 m y el
+ * 2.o bote cae a 11.5 m en el rincon izquierdo, antes de la trasera: un
+ * pase que muere donde tiene que morir. Antes abria con un pase a 45 m/s
+ * que, con el efecto y el COR que baja con la velocidad, subia por la
+ * pared del fondo y volvia hasta la frontal.
  */
-const INITIAL = { azimuthDeg: -6.5, elevationDeg: 0.5 } as const;
+const INITIAL = { azimuthDeg: -7.438, elevationDeg: 2.607, speed: 28 } as const;
 const initialOrigin = v3(COURT.width / 2, DEFAULT_CONTACT_HEIGHT, 8.2);
 const initialShot = deriveShot({
   origin: initialOrigin,
   azimuthDeg: INITIAL.azimuthDeg,
   elevationDeg: INITIAL.elevationDeg,
-  speed: SPEED.default,
+  speed: INITIAL.speed,
 });
 
 export const state: AppState = {
   origin: initialOrigin,
   azimuthDeg: INITIAL.azimuthDeg,
   elevationDeg: INITIAL.elevationDeg,
-  speed: SPEED.default,
+  speed: INITIAL.speed,
   model: 'ballistic',
   presetId: null,
   venue: DEFAULT_VENUE,
@@ -323,7 +324,18 @@ export const applyShotDoc = (doc: ShotDoc | unknown): boolean => {
 export const loadPreset = (id: string): void => {
   const preset = presetById(id);
   if (!preset) return;
-  const resolved = resolvePreset(preset, state.origin);
+  const model: PhysicsModel = preset.prefersBallistic ? 'ballistic' : state.model;
+  const physics = venueSimOptions(state.venue);
+  // En modo saque la altura de golpe la pone el bote con la mano, en el
+  // sitio desde donde se saca: se calcula antes de apuntar.
+  const spot = resolvePreset(preset, state.origin);
+  const strikeHeight = state.serveMode
+    ? simulateToss(spot.origin.x, spot.origin.z, state.serveToss, physics).strike.point.y
+    : undefined;
+  // Con el balistico se apunta para que el primer contacto caiga DE
+  // VERDAD en el punto de mira (y al crack, en su franja), con el aire del
+  // sitio de juego.
+  const resolved = resolvePreset(preset, state.origin, { model, physics, strikeHeight });
   update({
     origin: resolved.origin,
     azimuthDeg: resolved.azimuthDeg,
@@ -333,16 +345,6 @@ export const loadPreset = (id: string): void => {
     presetId: id,
     ...(preset.prefersBallistic ? { model: 'ballistic' as const } : {}),
   });
-  // En modo saque la altura de contacto la pone el bote con la mano, no
-  // el preset: se vuelve a apuntar al mismo sitio desde donde de verdad
-  // se le pega.
-  if (state.toss) {
-    const dir = normalize(sub(resolved.target, state.shot.origin));
-    update({
-      azimuthDeg: (Math.atan2(dir.x, -dir.z) * 180) / Math.PI,
-      elevationDeg: (Math.asin(Math.max(-1, Math.min(1, dir.y))) * 180) / Math.PI,
-    });
-  }
 };
 
 /**

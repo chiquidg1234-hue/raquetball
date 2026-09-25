@@ -27,7 +27,11 @@ export interface Shot {
   direction: Vec3;
   /** m/s */
   speed: number;
-  /** rad/s — ignorado hasta la fase 13. */
+  /**
+   * rad/s: el giro con el que sale de la raqueta. Lo usa el motor
+   * balistico (src/core/spin.ts); el geometrico lo ignora. Sin el, sale
+   * sin giro y lo va tomando en cada contacto.
+   */
   spin?: Vec3;
 }
 
@@ -42,12 +46,28 @@ export interface Bounce {
   outgoingSpeed: number;
   /** Grados respecto a la normal de la superficie. */
   incidenceAngleDeg: number;
+  /** rad/s, giro al llegar y al salir. Solo el motor balistico con efecto. */
+  spinIn?: Vec3;
+  spinOut?: Vec3;
+  /** La friccion se saturo: la pelota deslizo todo el contacto. */
+  slipped?: boolean;
+  /**
+   * Pared vertical tocada en la banda del crack y bajando: tau del
+   * criterio del nick (PNAS 2025). Rollout si < 1.
+   */
+  nickTau?: number;
+  /** Este contacto con la pared fue un nick: la pelota sale rodando. */
+  rollout?: boolean;
+  /** Desde este contacto con el piso la pelota rueda: ya no bota. */
+  rolling?: boolean;
 }
 
 export interface Sample {
   t: number;
   p: Vec3;
   v: Vec3;
+  /** rad/s. Solo el motor balistico con efecto. */
+  w?: Vec3;
 }
 
 export type Termination =
@@ -78,10 +98,28 @@ export interface SimOptions {
   sampleDt?: number;
   /** COR normal por superficie. Sobrescribe el valor global. */
   surfaceRestitution?: Partial<Record<SurfaceId, number>>;
-  /** Restitucion tangencial, para todas las superficies. */
+  /**
+   * Friccion de deslizamiento mu por superficie (sitio de juego). Con ella
+   * el motor calcula el efecto en cada contacto: agarre o deslizamiento.
+   */
+  surfaceFriction?: Partial<Record<SurfaceId, number>>;
+  /** E efectivo de la pelota (Pa), para el criterio del nick. */
+  ballStiffness?: number;
+  /**
+   * Cuanto COR se pierde por cada m/s de velocidad normal por encima de la
+   * de la prueba de homologacion (fraccion por m/s). Sin ella, 0.92 %.
+   * 0 = COR constante, como antes.
+   */
+  corSpeedLoss?: number;
+  /**
+   * Motor de antes, sin efecto: la velocidad paralela se multiplica por una
+   * restitucion tangencial fija y la pelota no gira. Solo para comparar.
+   */
+  disableSpin?: boolean;
+  /** Restitucion tangencial del motor sin efecto, para todas las superficies. */
   tangentialRestitution?: number;
   /**
-   * Restitucion tangencial por superficie (sitio de juego). Gana a
+   * Restitucion tangencial por superficie del motor sin efecto. Gana a
    * `tangentialRestitution`.
    */
   surfaceTangential?: Partial<Record<SurfaceId, number>>;
@@ -102,3 +140,9 @@ export interface SimOptions {
    */
   stopAfterFloorBounces?: number;
 }
+
+/** Lo que el sitio de juego le pasa al motor (src/core/venue.ts). */
+export type VenuePhysics = Pick<
+  SimOptions,
+  'dragK' | 'surfaceRestitution' | 'surfaceFriction' | 'ballStiffness' | 'corSpeedLoss'
+>;
