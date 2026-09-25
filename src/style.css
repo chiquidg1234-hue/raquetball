@@ -1673,6 +1673,16 @@ a.btn {
 .racquet-sep {
   width: 6px;
 }
+.racquet-bar select {
+  padding: 3px 6px;
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(19, 25, 32, 0.86);
+  border: 1px solid var(--line, #2a3340);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(6px);
+  max-width: 100%;
+}
 .racquet-caption {
   position: absolute;
   left: 6px;

@@ -11,7 +11,8 @@ import { CENTER_BOX } from '../core/court.js';
 import { TOSS_LIMITS, describeStrike } from '../core/serveToss.js';
 import { el, slider, type SliderHandle } from './dom.js';
 import type { PanelView } from './panels.js';
-import { state, update, type AppState } from './state.js';
+import { sliceSpin } from '../core/racquet.js';
+import { hitSpotS, state, update, type AppState } from './state.js';
 
 const metres = (v: number): string => `${v.toFixed(2)} m`;
 const degrees = (v: number): string => `${v.toFixed(1)}°`;
@@ -240,6 +241,22 @@ export const createShotPanel = (): PanelView => {
     }
   };
 
+  const slice = slider({
+    field: 'slice',
+    label: 'Efecto del golpe',
+    min: -30,
+    max: 30,
+    step: 1,
+    value: state.sliceDeg,
+    format: (v) => {
+      if (Math.abs(v) < 0.5) return 'plano';
+      const rpm = sliceSpin(state.speed, v, state.shot.direction, hitSpotS(state.hitSpot)).rpm;
+      return `${v > 0 ? 'cortado' : 'liftado'} ${Math.abs(v).toFixed(0)}° · ${Math.round(rpm)} rpm`;
+    },
+    hint: 'Cortado (slice): la raqueta baja por detrás de la pelota con la cara abierta y le da efecto hacia atrás, que la frena contra la frontal y ayuda al nick. Liftado: al revés.',
+    onInput: (sliceDeg) => update({ sliceDeg, presetId: null }),
+  });
+
   root.append(
     el('div', { class: 'section-title', text: 'Donde estoy' }),
     originX.root,
@@ -250,6 +267,7 @@ export const createShotPanel = (): PanelView => {
     azimuth.root,
     elevation.root,
     speed.root,
+    slice.root,
   );
   syncToss();
 
@@ -260,6 +278,7 @@ export const createShotPanel = (): PanelView => {
     ['azimuthDeg', azimuth, () => state.azimuthDeg],
     ['elevationDeg', elevation, () => state.elevationDeg],
     ['speed', speed, () => state.speed],
+    ['sliceDeg', slice, () => state.sliceDeg],
   ];
 
   return {
@@ -270,6 +289,8 @@ export const createShotPanel = (): PanelView => {
       for (const [key, handle, read] of handles) {
         if (changed.has(key as keyof AppState)) handle.set(read());
       }
+      // El rpm del corte depende de la velocidad y de donde se le pega.
+      if (changed.has('speed') || changed.has('hitSpot')) slice.set(state.sliceDeg);
       if (changed.has('serveToss')) {
         release.set(state.serveToss.releaseHeight);
         throwSpeed.set(state.serveToss.throwSpeed);

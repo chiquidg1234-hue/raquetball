@@ -18,19 +18,35 @@
  */
 
 import { BALL } from './constants.js';
+import { AXS_170T, AXS_MODEL, COP_HAND, HALF_WIDTH } from './racquet.js';
 import type { Vec3 } from './types.js';
 
 export type Stroke = 'forehand' | 'backhand';
 export type Handedness = 'right' | 'left';
 
 /**
- * Medidas de la raqueta para DIBUJARLA. El largo total es el maximo del
- * reglamento (22 in, IRF 2.4); el reparto cabeza/mango es ilustrativo.
+ * Medidas de la raqueta: la Gearbox AXS 170 Teardrop (src/core/racquet.ts).
+ * El largo es el publicado (22 in, el maximo del reglamento); la cabeza,
+ * la lagrima modelada con los 107 in^2 publicados.
  */
 export const RACQUET = {
-  length: 22 * 0.0254, // 0.5588 m
-  headLength: 0.33,
-  headWidth: 0.245,
+  length: AXS_170T.length,
+  headLength: AXS_170T.length - AXS_MODEL.throat,
+  headWidth: 2 * HALF_WIDTH,
+} as const;
+
+/**
+ * El golpe animado: cuanto gira la raqueta alrededor del hombro y cuanto
+ * tarda, antes y despues del contacto. Es para ENSENAR el gesto, no una
+ * medida: acelera al llegar (t^2) y frena al acompanar.
+ */
+export const SWING = {
+  backDeg: 110,
+  backTime: 0.28,
+  followDeg: 70,
+  followTime: 0.15,
+  /** Del centro de la mano al hombro, en planta: el radio del giro. */
+  shoulder: 0.55,
 } as const;
 
 /** Aproximaciones para dibujar los pies. Sin fuente: se avisa en pantalla. */
@@ -53,13 +69,21 @@ export interface FootPrint {
 export interface StrokeGeometry {
   /** Centro de la pelota en el golpe. */
   contact: Vec3;
-  /** Direccion del tiro: la normal de la cara del cordaje. */
+  /**
+   * Normal de la cara del cordaje. Es la direccion del tiro, salvo con
+   * corte o liftado: entonces la cara va abierta o cerrada la mitad del
+   * angulo (la pelota sale entre la normal y el camino de la raqueta).
+   */
   faceNormal: Vec3;
   /** Horizontal y en el plano de la cara: de la cabeza hacia el mango. */
   handleDir: Vec3;
-  /** Punto del cordaje que toca la pelota (centro de la cabeza). */
-  stringsCenter: Vec3;
+  /** Punto del cordaje que toca la pelota: el sitio elegido de la raqueta. */
+  hitPoint: Vec3;
+  /** Distancia del final del mango al punto de impacto (m). */
+  hitS: number;
+  /** Final del mango y punta de la cabeza. */
   gripEnd: Vec3;
+  tip: Vec3;
   /** Donde va la mano (sobre el mango). */
   hand: Vec3;
   frontFoot: FootPrint;
@@ -88,11 +112,19 @@ const onFloor = (a: Vec3): Vec3 => ({ x: a.x, y: 0, z: a.z });
 export const handleSide = (stroke: Stroke, hand: Handedness): 1 | -1 =>
   (stroke === 'forehand') === (hand === 'right') ? -1 : 1;
 
+export interface StrokeOptions {
+  /** Donde de la raqueta se le pega: distancia desde el final del mango. */
+  hitS?: number;
+  /** Corte (+) o liftado (-), en grados: abre o cierra la cara. */
+  bevelDeg?: number;
+}
+
 export const strokeGeometry = (
   contact: Vec3,
   direction: Vec3,
   stroke: Stroke,
   hand: Handedness,
+  opts: StrokeOptions = {},
 ): StrokeGeometry => {
   const d = norm(direction);
   // Horizontal del tiro. Si el tiro es vertical puro no hay "adelante":
@@ -102,12 +134,19 @@ export const strokeGeometry = (
   const right: Vec3 = { x: -flat.z, y: 0, z: flat.x };
   const handleDir = scale(right, handleSide(stroke, hand));
 
-  // El cordaje toca la pelota por detras: su centro esta un radio atras.
-  const stringsCenter = add(contact, scale(d, -BALL.radius));
-  const throat = add(stringsCenter, scale(handleDir, RACQUET.headLength / 2));
-  const handleLength = RACQUET.length - RACQUET.headLength;
-  const gripEnd = add(throat, scale(handleDir, handleLength));
-  const handPoint = add(throat, scale(handleDir, handleLength * 0.62));
+  // La cara se abre (corte) o se cierra (liftado) girando sobre el eje del
+  // mango, que es horizontal: el mango sigue siendo horizontal.
+  const tilt = (((opts.bevelDeg ?? 0) / 2) * Math.PI) / 180;
+  const el = Math.asin(Math.max(-1, Math.min(1, d.y)));
+  const faceNormal = norm(add(scale(flat, Math.cos(el + tilt)), { x: 0, y: Math.sin(el + tilt), z: 0 }));
+
+  // El cordaje toca la pelota por detras: el punto elegido esta un radio
+  // atras del centro, a lo largo de la normal de la cara.
+  const hitS = opts.hitS ?? COP_HAND;
+  const hitPoint = add(contact, scale(faceNormal, -BALL.radius));
+  const gripEnd = add(hitPoint, scale(handleDir, hitS));
+  const tip = add(hitPoint, scale(handleDir, hitS - RACQUET.length));
+  const handPoint = add(gripEnd, scale(handleDir, -AXS_MODEL.handAt));
 
   // Pies: en la linea de tiro, del lado del cuerpo. Derecha: la pelota a
   // la altura del talon delantero. Reves: justo por delante de la punta.
@@ -124,10 +163,12 @@ export const strokeGeometry = (
 
   return {
     contact,
-    faceNormal: d,
+    faceNormal,
     handleDir,
-    stringsCenter,
+    hitPoint,
+    hitS,
     gripEnd,
+    tip,
     hand: handPoint,
     frontFoot,
     backFoot,

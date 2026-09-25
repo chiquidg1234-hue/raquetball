@@ -31,10 +31,20 @@ import {
   type Toss,
   type TossParams,
 } from '../core/serveToss.js';
-import type { Handedness, Stroke } from '../core/stroke.js';
+import { COP_HAND, PIVOTS, powerPoint, sliceSpin } from '../core/racquet.js';
+import { SWING, type Handedness, type Stroke } from '../core/stroke.js';
 import { fromAzimuthElevation, normalize, sub, v3 } from '../core/vec3.js';
 
 export type LayoutId = 'split' | '3d' | 'plan' | 'front' | 'side';
+
+/**
+ * Donde se le pega en la raqueta: el centro de percusion (sin tiron en la
+ * mano) o el punto de mas salida con golpe de muneca o de brazo entero.
+ */
+export type HitSpot = 'cop' | 'wrist' | 'arm';
+
+export const hitSpotS = (spot: HitSpot): number =>
+  spot === 'cop' ? COP_HAND : powerPoint(PIVOTS[spot]);
 export type InputMode = 'drag' | 'sliders' | 'presets';
 
 export interface AppState {
@@ -77,6 +87,13 @@ export interface AppState {
   racquetStroke: Stroke | null;
   /** Diestro o zurdo: el espejo de todo el gesto. */
   handedness: Handedness;
+  /**
+   * Corte (+) o liftado (-) del golpe, en grados: cuanto va la raqueta en
+   * oblicuo respecto a su cara. Le da efecto a la pelota (racquet.ts).
+   */
+  sliceDeg: number;
+  /** En que punto de la raqueta se le pega. */
+  hitSpot: HitSpot;
 
   // --- problema inverso (fase 10) ---
   solveTarget: { x: number; z: number; bounceIndex: BounceIndex } | null;
@@ -117,6 +134,8 @@ const SHOT_KEYS: readonly (keyof AppState)[] = [
   'speed',
   'model',
   'venue',
+  'sliceDeg',
+  'hitSpot',
 ];
 
 /** Lo que decide el bote con la mano. */
@@ -137,11 +156,21 @@ export const deriveShot = (s: {
   azimuthDeg: number;
   elevationDeg: number;
   speed: number;
-}): Shot => ({
-  origin: clampToCourt(effectiveOrigin({ origin: s.origin, toss: s.toss ?? null })),
-  direction: fromAzimuthElevation(s.azimuthDeg, s.elevationDeg),
-  speed: s.speed,
-});
+  sliceDeg?: number;
+  hitSpot?: HitSpot;
+}): Shot => {
+  const direction = fromAzimuthElevation(s.azimuthDeg, s.elevationDeg);
+  const shot: Shot = {
+    origin: clampToCourt(effectiveOrigin({ origin: s.origin, toss: s.toss ?? null })),
+    direction,
+    speed: s.speed,
+  };
+  // El corte o el liftado le dan giro al salir de la raqueta; plano, nada.
+  if (s.sliceDeg) {
+    shot.spin = sliceSpin(s.speed, s.sliceDeg, direction, hitSpotS(s.hitSpot ?? 'cop')).spin;
+  }
+  return shot;
+};
 
 const tossFor = (s: {
   serveMode: boolean;
@@ -202,6 +231,8 @@ export const state: AppState = {
   toss: null,
   racquetStroke: 'forehand',
   handedness: 'right',
+  sliceDeg: 0,
+  hitSpot: 'cop',
 
   board: emptyBoard(),
   tool: 'select',
@@ -278,8 +309,12 @@ export const update = (patch: Partial<AppState>): void => {
   emit(changed);
 };
 
-/** Primer instante de la linea de tiempo: la mano suelta la pelota. */
-export const timelineStart = (): number => (state.toss ? -state.toss.duration : 0);
+/**
+ * Primer instante de la linea de tiempo: la mano suelta la pelota (saque)
+ * o la raqueta empieza a venir de atras (el golpe animado).
+ */
+export const timelineStart = (): number =>
+  Math.min(state.toss ? -state.toss.duration : 0, state.racquetStroke ? -SWING.backTime : 0);
 
 /**
  * El documento del estado actual. El origen es el EFECTIVO (con la altura

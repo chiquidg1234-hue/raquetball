@@ -461,8 +461,19 @@ Conrrado Moscoso juega la **AXS 170 Teardrop**.
 | Quad | "expanded sweet spot" | RacquetWorld |
 
 Gearbox no publica ni el ancho de la cabeza ni el patrón de cuerdas de la AXS (la GX1
-era 14×19). El dibujo usa la superficie y el largo publicados y una forma de lágrima
-aproximada.
+era 14×19), ni la inercia. **Se modela, y se dice en pantalla:** el medio ancho del
+encordado sigue sin(π t^1.5)^0.45 (t = 0 en la garganta, a 16.5 cm de la punta del mango;
+lo más ancho al 63 % de la cabeza, que es lo que hace a una lágrima). Pidiendo exactamente
+los 107 in² publicados sale un encordado de **25.0 cm** de ancho. La masa se reparte en
+mango (varilla), marco (a lo largo del borde) y cuerdas (placa); el reparto mango/marco
+sale de pedir el balance publicado, y de ahí se integran el centro de masas y la inercia:
+
+| Sale del modelo | Valor |
+|---|---|
+| Reparto (170 g sin cordaje) | mango 45 g, marco 125 g; + 18 g de cuerdas = 188 g |
+| Centro de masas, encordada | 30.0 cm desde la punta del mango (29.2 sin cordaje = 27.9 + 1.3) |
+| Inercia respecto al centro de masas | 0.00508 kg·m² (a 10 cm del mango: 126 kg·cm²) |
+| Cabeza (encordado) | de 16.5 a 54.7 cm |
 
 **Dónde pegarle, con física de impacto**
 ([Cross, impacto de implementos](https://www.physics.usyd.edu.au/~cross/PUBLICATIONS/24.%20ObliqueImpact.PDF)).
@@ -476,17 +487,46 @@ salida (saque, bola casi quieta):  v = (1 + e_A)·Ω·(x − x_pivote)
 
 Hacia la punta la raqueta va más rápida (Ω·x) pero su masa efectiva cae. El máximo
 queda en la mitad superior de la cabeza de una raqueta cargada de cabeza, justo lo que
-Gearbox llama "sweet spot más alto". La distribución de masa se reconstruye con los
-datos publicados (170 g, 13 mm HH, 22 in).
+Gearbox llama "sweet spot más alto". Con la raqueta de arriba:
 
-**Velocidad de cabeza.** No hay medida publicada para racquetball, pero se deduce: para
-sacar a 67 m/s (150 mph) con Mₑ ≈ 0.10 kg hace falta que la raqueta vaya a **~50 m/s**
-en el punto de impacto. Es del orden del smash de bádminton, 52–56 m/s
+| Punto (desde la punta del mango) | Dónde | Qué pasa ahí |
+|---|---|---|
+| **Centro de percusión**, pivote en la mano (7 cm) | **41.8 cm** | la mano no recibe tirón: x_cop = x_cm + I/(M(x_cm − x_p)) |
+| Centro de percusión, pivote en la muñeca / el codo | 37.7 / 34.2 cm | se acerca al centro de masas cuanto más lejos gira |
+| **Punto de más salida**, golpe de muñeca | **47.7 cm** | máximo de v/Ω |
+| Punto de más salida, brazo entero | 41.0 cm | ídem, pivote en el codo |
+| Masa efectiva: centro de percusión / a 2 cm de la punta | 124 g / 65 g | por eso la punta "no sale" |
+
+En la app se elige dónde pegarle (centro de percusión, punto de más salida con muñeca o
+con brazo) y se ve en la raqueta: verde el centro de percusión, naranja el de más salida.
+
+**Velocidad de cabeza.** No hay medida publicada para racquetball, pero se deduce:
+V = v (Mₑ + m)/((1 + e) Mₑ), con e = 0.85 pelota–cuerdas (no medido; el COR de la prueba
+de la pelota). Para sacar a 67 m/s (150 mph) la raqueta tiene que ir a **47.8 m/s** en el
+centro de percusión, y a **58.4 m/s** si se le pega a 2 cm de la punta; un drive a 28 m/s
+pide 20.0 m/s. Es del orden del smash de bádminton, 52–56 m/s
 ([King et al.](https://mdpi-res.com/d_attachment/applsci/applsci-10-01248/article_deploy/applsci-10-01248.pdf?version=1581582279)).
 
-**Slice.** Un golpe cortado es la cara moviéndose en oblicuo respecto a su normal. El
-mismo modelo de agarre, ahora pelota contra cuerdas, da el giro de salida, y ese giro
-viaja con el tiro y cambia cada rebote.
+**Slice.** Un golpe cortado es la cara abierta un ángulo β y moviéndose en oblicuo
+respecto a su normal: a Vₙ (la velocidad de cabeza de arriba) en la normal y a
+Vₜ = Vₙ tan β a lo largo de la cara. La pelota, casi quieta, agarra en las cuerdas como
+en una pared (§7): R ω = (1 + eₓ) Vₜ/(1 + α), salvo que la fricción no alcance
+(R ω ≤ μ v/α, con μ = 0.4 pelota–cuerdas: en tenis 0.3–0.5, sin medida en racquetball).
+
+| Pelota a 45 m/s, golpe en el centro de percusión | Vₜ | Giro |
+|---|---|---|
+| cortado 10° | 5.7 m/s | 1260 rpm |
+| cortado 20° | 11.7 m/s | 2590 rpm |
+| cortado 30° | 18.5 m/s | 4110 rpm |
+
+Crece lineal con la velocidad de la pelota (a 28 m/s y 20°: 1610 rpm) y no resbala hasta
+β ≈ 55°. Liftado (β < 0) es lo mismo al revés. Ese giro viaja con el tiro y cambia cada
+rebote (§7); el corte hace que la parte de abajo de la pelota vaya hacia delante, el mismo
+sentido que ayuda al nick (§8). La dirección y la velocidad del tiro las sigue poniendo el
+jugador: el corte solo añade el giro.
+
+**La animación del golpe** (atrás 110° en 0.28 s, acompañamiento 70° en 0.15 s, girando en
+el hombro) es para enseñar el gesto, no una medida; los pies, también aproximados.
 
 ## 11. El COR baja con la velocidad del impacto
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { BALL } from '../src/core/constants.js';
+import { COP_HAND } from '../src/core/racquet.js';
 import { RACQUET, STANCE, handleSide, strokeGeometry } from '../src/core/stroke.js';
 import type { Vec3 } from '../src/core/types.js';
 import { fromAzimuthElevation, v3 } from '../src/core/vec3.js';
@@ -17,8 +18,26 @@ describe('la raqueta en el golpe', () => {
     const g = strokeGeometry(contact, straight, 'forehand', 'right');
     expect(dot(g.faceNormal, straight)).toBeCloseTo(1, 12);
     // El cordaje toca la pelota por detras: un radio atras del centro.
-    expect(len(sub(contact, g.stringsCenter))).toBeCloseTo(BALL.radius, 12);
-    expect(dot(sub(contact, g.stringsCenter), straight)).toBeGreaterThan(0);
+    expect(len(sub(contact, g.hitPoint))).toBeCloseTo(BALL.radius, 12);
+    expect(dot(sub(contact, g.hitPoint), straight)).toBeGreaterThan(0);
+  });
+
+  it('por defecto se le pega en el centro de percusion de la AXS, no en el centro de la cabeza', () => {
+    // Antes la pelota tocaba el centro de una elipse generica. Ahora toca
+    // el punto de la raqueta que se elija; por defecto, el que no da tiron
+    // a la mano (src/core/racquet.ts).
+    const g = strokeGeometry(contact, straight, 'forehand', 'right');
+    expect(len(sub(g.gripEnd, g.hitPoint))).toBeCloseTo(COP_HAND, 12);
+    const tipHit = strokeGeometry(contact, straight, 'forehand', 'right', { hitS: 0.5 });
+    expect(len(sub(tipHit.gripEnd, tipHit.hitPoint))).toBeCloseTo(0.5, 12);
+  });
+
+  it('con corte la cara se abre la mitad del angulo y el mango sigue horizontal', () => {
+    const g = strokeGeometry(contact, fromAzimuthElevation(0, 0), 'forehand', 'right', { bevelDeg: 20 });
+    expect((Math.asin(g.faceNormal.y) * 180) / Math.PI).toBeCloseTo(10, 9);
+    expect(g.handleDir.y).toBeCloseTo(0, 12);
+    const top = strokeGeometry(contact, fromAzimuthElevation(0, 0), 'forehand', 'right', { bevelDeg: -20 });
+    expect(top.faceNormal.y).toBeLessThan(0);
   });
 
   it('el mango es horizontal y esta en el plano de la cara', () => {
@@ -32,8 +51,8 @@ describe('la raqueta en el golpe', () => {
 
   it('mide lo que permite el reglamento: 22 in de punta a punta', () => {
     const g = strokeGeometry(contact, straight, 'forehand', 'right');
-    const tipToGrip = len(sub(g.gripEnd, g.stringsCenter)) + RACQUET.headLength / 2;
-    expect(tipToGrip).toBeCloseTo(22 * 0.0254, 9);
+    expect(len(sub(g.gripEnd, g.tip))).toBeCloseTo(22 * 0.0254, 9);
+    expect(RACQUET.length).toBeCloseTo(22 * 0.0254, 12);
   });
 
   it('diestro: derecha con el cuerpo a la izquierda de la pelota, reves a la derecha', () => {

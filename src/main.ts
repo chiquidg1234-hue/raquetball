@@ -51,13 +51,16 @@ import {
   simOptionsFor,
   timelineStart,
   state,
+  hitSpotS,
   subscribe,
   toggleServeMode,
   update,
   type AppState,
+  type HitSpot,
   type LayoutId,
 } from './ui/state.js';
 import { createVenuePanel } from './ui/panelVenue.js';
+import { AXS_170T, requiredHeadSpeed, sliceSpin } from './core/racquet.js';
 import { strokeAdvice, strokeGeometry, type Stroke } from './core/stroke.js';
 
 const views = new Map<ProjectionId, CourtView2D>();
@@ -231,7 +234,7 @@ const mount3D = (): void => {
   // Solo en el servidor de desarrollo, para las pruebas de navegador del
   // arrastre en 3D. La build lo elimina (import.meta.env.DEV es false).
   if (import.meta.env.DEV) {
-    (window as unknown as { __raquet: unknown }).__raquet = { scene: scene3d, state };
+    (window as unknown as { __raquet: unknown }).__raquet = { scene: scene3d, state, update };
   }
 
   const host = mustGet('camera-presets');
@@ -311,8 +314,40 @@ const mountRacquetBar = (): void => {
     b.addEventListener('click', () => update({ handedness: hand }));
     bar.appendChild(b);
   }
+  bar.appendChild(el('span', { class: 'racquet-sep' }));
+  const spot = document.createElement('select');
+  spot.className = 'select select--small';
+  spot.setAttribute('data-field', 'hit-spot');
+  spot.title = 'En qué punto de la raqueta le pegas';
+  for (const [value, label] of [
+    ['cop', 'Pegar en: centro de percusión'],
+    ['wrist', 'Pegar en: más salida (muñeca)'],
+    ['arm', 'Pegar en: más salida (brazo)'],
+  ] as const) {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    spot.appendChild(o);
+  }
+  spot.addEventListener('change', () => update({ hitSpot: spot.value as HitSpot, presetId: null }));
+  bar.appendChild(spot);
   const caption = el('div', { class: 'racquet-caption', id: 'racquet-caption' });
   host.append(bar, caption);
+};
+
+/** Una linea con lo que ensena la raqueta: donde se le pega y que pide. */
+const racquetCaption = (): string => {
+  const stroke = state.racquetStroke!;
+  const s = hitSpotS(state.hitSpot);
+  const where =
+    state.hitSpot === 'cop'
+      ? 'en el centro de percusión (verde): la mano no recibe tirón'
+      : `en el punto de más salida con ${state.hitSpot === 'wrist' ? 'golpe de muñeca' : 'el brazo entero'} (naranja)`;
+  const head = requiredHeadSpeed(state.speed, s);
+  const slice = state.sliceDeg
+    ? ` · ${state.sliceDeg > 0 ? 'cortado' : 'liftado'} ${Math.abs(state.sliceDeg).toFixed(0)}°: ${Math.round(sliceSpin(state.speed, state.sliceDeg, state.shot.direction, s).rpm)} rpm`
+    : '';
+  return `${AXS_170T.name}. Le pegas ${where}, a ${(s * 100).toFixed(0)} cm del final del mango: para ${state.speed.toFixed(0)} m/s la raqueta tiene que ir a ${head.toFixed(0)} m/s ahí${slice}. ${strokeAdvice(stroke)} Aproximados: los pies, y la forma y el reparto de masa de la raqueta (Gearbox publica peso, balance, largo y superficie).`;
 };
 
 const syncRacquet = (): void => {
@@ -322,7 +357,14 @@ const syncRacquet = (): void => {
       state.shot.direction,
       state.racquetStroke,
       state.handedness,
+      { hitS: hitSpotS(state.hitSpot), bevelDeg: state.sliceDeg },
     );
+    scene3d.racquet.setSwing(state.playhead);
+  }
+  const spot = document.querySelector<HTMLSelectElement>('[data-field="hit-spot"]');
+  if (spot) {
+    spot.value = state.hitSpot;
+    spot.hidden = !state.racquetStroke;
   }
   for (const b of document.querySelectorAll<HTMLElement>('[data-stroke]')) {
     b.classList.toggle('btn--active', b.dataset.stroke === (state.racquetStroke ?? 'none'));
@@ -334,9 +376,7 @@ const syncRacquet = (): void => {
   const caption = document.getElementById('racquet-caption');
   if (caption) {
     caption.hidden = !state.racquetStroke;
-    if (state.racquetStroke) {
-      caption.textContent = `${strokeAdvice(state.racquetStroke)} Pelota a ${state.shot.origin.y.toFixed(2)} m del piso. Pies: posición aproximada.`;
-    }
+    if (state.racquetStroke) caption.textContent = racquetCaption();
   }
 };
 
@@ -654,9 +694,11 @@ const syncTimeline = (): void => {
   if (document.activeElement !== scrub) scrub.value = String(state.playhead);
   // En pantallas estrechas el formato largo se corta a media cifra, que
   // es peor que no mostrarlo: se acorta en vez de truncarse.
+  // Antes del golpe: con saque, la pelota sale de la mano; sin saque, solo
+  // es la raqueta viniendo de atras.
   timeLabel.textContent =
     state.playhead < 0
-      ? `mano ${state.playhead.toFixed(2)} s`
+      ? `${state.toss ? 'mano' : 'swing'} ${state.playhead.toFixed(2)} s`
       : window.innerWidth < 560
         ? `${state.playhead.toFixed(2)}/${total.toFixed(1)}s`
         : `${state.playhead.toFixed(3)} s / ${total.toFixed(2)} s`;
@@ -715,12 +757,16 @@ const redraw = (changed?: ReadonlySet<string>): void => {
       !changed ||
       changed.has('shot') ||
       changed.has('racquetStroke') ||
-      changed.has('handedness')
+      changed.has('handedness') ||
+      changed.has('sliceDeg') ||
+      changed.has('hitSpot')
     ) {
       syncRacquet();
     }
     if (!changed || changed.has('aim')) scene3d.trajectory.setAim(state.aim);
     scene3d.trajectory.setPlayhead(state.playhead);
+    // El golpe animado: la raqueta sigue a la linea de tiempo.
+    scene3d.racquet.setSwing(state.playhead);
     scene3d.invalidate();
   }
 

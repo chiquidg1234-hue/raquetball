@@ -31,6 +31,10 @@ export interface ShotDoc {
   s: number;
   /** motor: g = geometrico, b = balistico */
   m: 'g' | 'b';
+  /** corte (+) o liftado (-) del golpe, grados; sin el, plano */
+  sl?: number;
+  /** donde se le pega en la raqueta: c = centro de percusion, w = muneca, a = brazo */
+  hs?: 'c' | 'w' | 'a';
 }
 
 export interface ViewDoc {
@@ -124,19 +128,31 @@ export interface Doc {
 
 const r3 = (n: number): number => Math.round(n * 1000) / 1000;
 
+const HIT_CODE = { cop: 'c', wrist: 'w', arm: 'a' } as const;
+type HitSpotId = keyof typeof HIT_CODE;
+
 export const toShotDoc = (s: {
   origin: { x: number; y: number; z: number };
   azimuthDeg: number;
   elevationDeg: number;
   speed: number;
   model: 'geometric' | 'ballistic';
-}): ShotDoc => ({
-  o: [r3(s.origin.x), r3(s.origin.y), r3(s.origin.z)],
-  a: r3(s.azimuthDeg),
-  e: r3(s.elevationDeg),
-  s: r3(s.speed),
-  m: s.model === 'ballistic' ? 'b' : 'g',
-});
+  sliceDeg?: number;
+  hitSpot?: HitSpotId;
+}): ShotDoc => {
+  const doc: ShotDoc = {
+    o: [r3(s.origin.x), r3(s.origin.y), r3(s.origin.z)],
+    a: r3(s.azimuthDeg),
+    e: r3(s.elevationDeg),
+    s: r3(s.speed),
+    m: s.model === 'ballistic' ? 'b' : 'g',
+  };
+  // Solo si no es lo de siempre: un tiro plano en el centro de percusion
+  // no alarga el enlace.
+  if (s.sliceDeg) doc.sl = r3(s.sliceDeg);
+  if (s.hitSpot && s.hitSpot !== 'cop') doc.hs = HIT_CODE[s.hitSpot];
+  return doc;
+};
 
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -150,11 +166,16 @@ export const fromShotDoc = (
   elevationDeg: number;
   speed: number;
   model: 'geometric' | 'ballistic';
+  sliceDeg: number;
+  hitSpot: HitSpotId;
 } | null => {
   if (!raw || typeof raw !== 'object') return null;
   const d = raw as Partial<ShotDoc>;
   if (!Array.isArray(d.o) || d.o.length !== 3) return null;
+  const hit = (Object.keys(HIT_CODE) as HitSpotId[]).find((k) => HIT_CODE[k] === d.hs) ?? 'cop';
   return {
+    sliceDeg: Math.max(-30, Math.min(30, num(d.sl, 0))),
+    hitSpot: hit,
     origin: {
       x: num(d.o[0], 3),
       y: num(d.o[1], 0.9),
